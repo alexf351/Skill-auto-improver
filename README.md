@@ -603,6 +603,120 @@ It also supports lightweight command probes for more realistic skill checks:
 ]
 ```
 
+## Security & Audit
+
+### Zero External Dependencies
+
+**Verified in `setup.py`:**
+- `install_requires=[]` — no external packages required
+- All functionality uses only Python standard library (dataclasses, pathlib, json, subprocess, etc.)
+- Safe to run in restricted environments with no network access
+
+**Verification:**
+```bash
+# Confirm zero deps
+$ python setup.py check
+$ grep install_requires setup.py
+# install_requires=[],
+```
+
+### Execution Isolation
+
+Proposed patches are executed in **isolated Python subprocess** with:
+
+- **30-second timeout** (hard limit, prevents hangs)
+- **Limited environment** (no credentials leakage)
+- **No shell execution** (no injection attacks)
+- **Captured I/O** (stdout/stderr logged separately)
+- **Automatic rollback on failure** (test-driven safety)
+
+**How it works:**
+```python
+# Code runs here (isolated subprocess)
+proc = subprocess.run(
+    [sys.executable, "-c", test_code],
+    timeout=30,              # ← Hard timeout
+    capture_output=True,     # ← I/O captured
+    text=True,
+    env={"PYTHONPATH": workspace},  # ← Limited env
+)
+```
+
+For detailed isolation architecture and audit procedures, see [CODE_AUDIT_GUIDE.md](./CODE_AUDIT_GUIDE.md).
+
+### Logging & Audit Trail
+
+Every operation is logged with timestamp, action, and result:
+
+- **Observe logs:** What behavior was observed
+- **Inspect logs:** Proposals generated (JSON for easy parsing)
+- **Amend logs:** Patches applied, before/after diffs
+- **Evaluate logs:** Pass/fail metrics, regressions detected
+- **Execute logs:** Subprocess stdout/stderr
+
+**Example audit trail:**
+```
+2026-03-24 10:15:23 [OBSERVE] Loaded skill from SKILL.md
+2026-03-24 10:15:24 [INSPECT] Generated 2 proposals (confidence: 0.85, 0.80)
+2026-03-24 10:15:25 [USER] Approved patches via CLI
+2026-03-24 10:15:26 [AMEND] Backup: skill-2026-03-24_10-15-26.zip
+2026-03-24 10:15:27 [EXECUTE] Test passed in 2.3s
+2026-03-24 10:15:28 [EVALUATE] Pass rate improved: 0.67 → 0.89 ✓
+```
+
+All logs retained for 30 days (configurable), older logs archived.
+
+### Change Approval & Review
+
+**Required approval gate before applying changes:**
+
+```
+OBSERVE → INSPECT → [USER REVIEWS & APPROVES] → AMEND
+```
+
+User must explicitly approve patches before they're applied:
+
+```bash
+$ skill-auto-improver improve my-skill \
+    --show-proposals      # Review proposals
+    # User reads proposals, decides...
+    --approve             # Explicit approval required
+```
+
+No patches are applied without user approval.
+
+### Backup & Rollback
+
+- **Automatic backup** created before any AMEND operation
+- **Automatic rollback** if test fails after patch
+- **Manual rollback** available on-demand
+
+```bash
+# Rollback to previous state
+$ skill-auto-improver rollback --skill my-skill --backup 2026-03-24_10-15-27
+
+# List available backups
+$ skill-auto-improver list-backups --skill my-skill
+```
+
+Backups retained for 60 days (configurable), with integrity verification.
+
+For operational procedures and disaster recovery, see [OPERATIONAL_SAFETY.md](./OPERATIONAL_SAFETY.md).
+
+### Code Review Points
+
+**For security audits, focus on:**
+
+1. **Path validation** (`applier.py` ~200-250): All file operations use absolute paths, sandboxed to workspace
+2. **Subprocess execution** (`applier.py` ~350-400): Timeout enforced, no shell, environment whitelist
+3. **Approval gates** (`loop.py`): User approval required before AMEND
+4. **Backup procedures** (`applier.py`): Created before write, restored on failure
+5. **Logging** (all stages): Every action logged with timestamp and result
+
+See [CODE_AUDIT_GUIDE.md](./CODE_AUDIT_GUIDE.md) for line-by-line security review entry points.
+
+---
+
 ## Roadmap
 
 ### Done ✅
