@@ -1,0 +1,15 @@
+[
+  {
+    "name": "formal_greeting_runtime",
+    "input_data": {
+      "command": ["python3", "check_skill.py"]
+    },
+    "expected_output": {
+      "exit_code": 0,
+      "stdout_contains": ["formal greeting ok"],
+      "stdout_not_contains": ["formal greeting missing"],
+      "stderr_contains": [],
+      "stderr_not_contains": ["Traceback"]
+    }
+  }
+]

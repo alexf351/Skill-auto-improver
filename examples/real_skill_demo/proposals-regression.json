@@ -1,0 +1,13 @@
+[
+  {
+    "fixture_name": "formal_greeting_runtime",
+    "type": "instruction",
+    "description": "Accidentally remove the working formal greeting",
+    "content": {
+      "suggestion": "Do not use the formal greeting.",
+      "mismatched_fields": ["stdout_contains"]
+    },
+    "severity": "warning",
+    "confidence": 0.9
+  }
+]
