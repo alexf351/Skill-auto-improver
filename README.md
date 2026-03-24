@@ -14,6 +14,40 @@ With built-in **rollback safety** and **version history**.
 
 ## What's Shipped
 
+### ✅ Proposer + SharedBrain Integration (2026-03-24, Latest)
+
+**File:** `src/skill_auto_improver/proposer.py` (enhanced)
+
+Brain-aware proposal generation for cross-skill learning:
+
+- ProposalEngine accepts optional `SharedBrain` instance (backward compatible)
+- Loads promotion wisdom, directives, mastery, and regression patterns from brain
+- Boosts confidence scores based on cross-skill promotion history (up to +0.09)
+- Enriches memory hints with cross-skill lessons and recommendations
+- Applies skill mastery learning to proposal type preferences
+- Graceful degradation: proposals work even if brain queries fail
+
+**Cross-Skill Confidence Boost:**
+```
+base_confidence (0.85)
+  + preference bonus (+0.03)
+  + regression-prone bonus (+0.04)
+  + promotion wisdom boost (up to +0.09)
+  + skill mastery bonus (+0.02)
+  = final confidence (0.80-0.99)
+```
+
+**Memory Hints Enhanced With:**
+- Cross-skill promotion wisdom ("promoted in: kiro-ugc-brief, morning-brief")
+- Shared lessons from other skills
+- Prevention rules for known regressions
+
+**Tests:** 10 new unit tests for brain integration (all passing)
+
+**Impact:** Nightly orchestrator now generates smarter proposals informed by 6+ days of accumulated cross-skill learning.
+
+---
+
 ### ✅ Multi-Skill Orchestration + Shared Brain (2026-03-24)
 
 **Files:** 
