@@ -20,6 +20,33 @@ Perfect for maintaining large skill ecosystems where manual optimization becomes
 
 ---
 
+## 🔒 Privacy & Local-First Architecture
+
+**Core principle:** Skill Auto-Improver is **100% local and auditable**.
+
+### What stays on your machine:
+- ✅ All optimization logic (observe, inspect, amend, evaluate)
+- ✅ All skill code and fixtures
+- ✅ All learned memory and promotion history
+- ✅ Full source code (you can review every line)
+- ✅ No external API calls from the library itself
+
+### Optional: External integrations
+The **operational layer** (nightly crons, summaries, backups) can optionally send to external services, but:
+- ⚙️ This is a **deployment choice**, not built into the library
+- ⚙️ Telegram delivery is managed by OpenClaw's cron system, not by Skill Auto-Improver
+- ⚙️ You can run Skill Auto-Improver completely offline if desired
+- ⚙️ All data sent to external services is your choice (backups, summaries, etc.)
+
+### Data you control:
+- **Nightly backups** — Optional; sent to Telegram only if you configure it
+- **Morning summaries** — Optional; delivered via OpenClaw crons only if you enable them
+- **Run history** — Local JSONL file; never leaves your machine unless you explicitly send it
+
+**Bottom line:** This is a local optimization engine. The deployment scripts show how we use it with Telegram for convenience, but the library itself has zero external dependencies and zero external calls.
+
+---
+
 ## Quick Start
 
 ### Installation
@@ -435,9 +462,36 @@ export TELEGRAM_BOT_TOKEN=your-bot-token
 export TELEGRAM_CHAT_ID=your-chat-id
 ```
 
-### Cron Setup
+### Using Skill Auto-Improver Locally (No External Calls)
 
-Three nightly jobs maintain the system. See [CRON_SETUP.md](CRON_SETUP.md) for:
+Want to use Skill Auto-Improver without any external integrations?
+
+```python
+from skill_auto_improver import SkillAutoImprover, SkillTrialConfig
+
+# Point to your skill
+improver = SkillAutoImprover(skill_path="/path/to/skill")
+
+# Run optimization loop entirely locally
+trace = improver.run()
+
+# Results stay on your machine
+for step in trace.steps:
+    print(f"{step.stage}: {step.status}")
+
+# Access learned memory (also local)
+memory = improver.operating_memory.load_context()
+print(memory.lessons)
+print(memory.promotion_wisdom)
+```
+
+No Telegram, no external APIs, no cloud calls. 100% local.
+
+### Optional: Cron Setup (With Telegram)
+
+If you want nightly automation with Telegram summaries, see [CRON_SETUP.md](CRON_SETUP.md):
+
+Three optional nightly jobs integrate with OpenClaw's cron system:
 
 - **Nightly Orchestrator** (2 AM PST) — Run trials, log history
 - **Morning Summary** (7 AM PST) — Send Telegram brief
