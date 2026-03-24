@@ -194,9 +194,33 @@ Expand to multi-skill orchestration with shared learning across skills.
 - Added `tests/test_examples.py` to verify the demo actually runs and proves both acceptance + rollback behavior
 - **Total: 77 unit tests, expected passing**
 
+### 2026-03-24 (Autonomous Build Block): Proposer + SharedBrain Integration
+- Integrated `ProposalEngine` with `SharedBrain` for cross-skill learning in proposals
+- ProposalEngine now accepts optional `SharedBrain` instance (backward compatible)
+- Added `_load_brain_context()` to extract:
+  - Core directives applicable to the skill
+  - Skill mastery learnings (most useful proposal types)
+  - Regression patterns for prevention
+  - Promotion wisdom from other skills
+  - Fixture library suggestions
+- Enhanced confidence scoring with promotion wisdom boost (up to +0.09 for proven patterns)
+- Enriched memory hints with cross-skill lessons and promotion history
+- Proposal generation now threads `skill_name` parameter for brain queries
+- Added graceful degradation: proposals work even if brain queries fail
+- Added 10 new unit tests covering:
+  - Brain acceptance and backward compatibility
+  - Context loading from brain
+  - Confidence boosting from promotion wisdom
+  - Memory hints with cross-skill lessons
+  - Proposal ranking with brain directives
+  - Full integration flow
+- **Total: 147 unit tests, all passing** (+10 from integration tests)
+
 ## Next Highest-Leverage Increment
-- Expand evaluator hooks beyond lightweight command probes into reusable real skill execution harnesses while preserving guarded acceptance rules
-- Add a thin CLI wrapper for observe/inspect summaries so operators can inspect recent run signals without writing custom scripts
+- Memory-driven proposal ranking - Full reordering based on per-fixture success history
+- Fixture suggestion CLI - Recommend library patterns for new fixtures
+- Operator dashboard CLI - Browse brain state and recent trials
+- Automated promotion rules - Apply learned acceptance rules without operator review
 
 ### 2026-03-23: Trace-Aware Observe/Inspect Stages
 - Added `load_traces()` + `summarize_traces()` in `logger.py` so recent run logs can be consumed as structured operating signals instead of only archived JSON

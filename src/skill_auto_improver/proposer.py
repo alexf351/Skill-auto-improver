@@ -7,15 +7,24 @@ Analyzes deltas to suggest:
 - Supporting artifact updates (references/checklists beyond SKILL.md)
 - Test case additions (new golden fixtures to prevent regression)
 - Reasoning suggestions (how to fix the root cause)
+
+Brain-aware proposal generation:
+- Load promotion wisdom from shared brain to boost confidence
+- Use regression patterns to strengthen warnings
+- Rank proposals based on what's worked across skills
+- Apply cross-skill lessons to fixture-specific guidance
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .evaluator import TestResult, GoldenFixture
+
+if TYPE_CHECKING:
+    from .shared_brain import SharedBrain
 
 
 @dataclass(slots=True)
@@ -71,10 +80,24 @@ class ProposalEngine:
     2. Supporting artifact proposals: reference/checklist changes beyond SKILL.md
     3. Test case proposals: new fixtures to prevent regression
     4. Reasoning proposals: diagnostic hints for the amend stage
+    
+    With optional brain integration:
+    - Boosts confidence scores using promotion wisdom
+    - Applies regression prevention patterns
+    - Reorders proposals based on cross-skill success
+    - Enriches fixtures with cross-skill lessons
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, brain: SharedBrain | None = None):
+        """
+        Initialize proposal engine with optional shared brain.
+        
+        Args:
+            brain: Optional SharedBrain instance for cross-skill learning.
+                   If provided, proposals will be enhanced with promotion wisdom,
+                   regression patterns, and cross-skill insights.
+        """
+        self.brain = brain
 
     def generate_proposals(
         self,
@@ -82,13 +105,33 @@ class ProposalEngine:
         original_fixtures: list[GoldenFixture] | None = None,
         operating_memory: dict[str, Any] | None = None,
         skill_path: str | Path | None = None,
+        skill_name: str | None = None,
     ) -> ProposalReport:
+        """
+        Generate proposals with optional brain context.
+        
+        Args:
+            failed_results: Test results that failed
+            original_fixtures: Original golden fixtures
+            operating_memory: Per-skill operating memory
+            skill_path: Path to the skill root
+            skill_name: Name of the skill being improved (for brain queries)
+        
+        Returns:
+            ProposalReport with brain-enhanced proposals if brain is available
+        """
         memory_context = operating_memory or {}
         skill_profile = self._skill_structure_profile(skill_path)
         memory_context = {
             **memory_context,
             "skill_profile": skill_profile,
         }
+        
+        # Enrich memory context with brain wisdom if available
+        if self.brain and skill_name:
+            brain_context = self._load_brain_context(skill_name)
+            memory_context.update(brain_context)
+        
         report = ProposalReport(total_failures=len(failed_results), memory_context=memory_context)
 
         for result in failed_results:
@@ -288,6 +331,18 @@ class ProposalEngine:
             hints.append("prefer=" + ", ".join(boosts[:3]))
         if avoids:
             hints.append("avoid=" + ", ".join(avoids[:3]))
+        
+        # Add cross-skill promotion wisdom if available
+        if memory_context.get("brain_context") and memory_context.get("promotion_wisdom"):
+            for wisdom in memory_context["promotion_wisdom"]:
+                if fixture_name == wisdom.get("fixture_name"):
+                    if wisdom.get("shared_lessons"):
+                        lessons_str = "; ".join(wisdom["shared_lessons"][:2])
+                        hints.append(f"cross_skill_lesson={lessons_str}")
+                    skills_str = ", ".join(wisdom.get("skills_successful", [])[:3])
+                    if skills_str:
+                        hints.append(f"promoted_in={skills_str}")
+        
         return "; ".join(hints)
 
     def _fixture_is_regression_prone(self, fixture_name: str, memory_context: dict[str, Any]) -> bool:
@@ -314,6 +369,22 @@ class ProposalEngine:
             confidence += 0.04
         if promotion_profile.get("historically_protected") and proposal_type == "instruction":
             confidence -= 0.02
+        
+        # Boost confidence based on brain promotion wisdom
+        if memory_context.get("brain_context") and memory_context.get("promotion_wisdom"):
+            for wisdom in memory_context["promotion_wisdom"]:
+                if fixture_name == wisdom.get("fixture_name"):
+                    # If this exact fixture pattern was promoted elsewhere, boost confidence
+                    confidence += wisdom.get("confidence", 0.8) * 0.02
+                    if proposal_type in wisdom.get("proposal_type_sequence", []):
+                        confidence += 0.03
+        
+        # Apply skill mastery learning to proposal type confidence
+        if memory_context.get("skill_mastery"):
+            mastery = memory_context["skill_mastery"]
+            if proposal_type == mastery.get("most_useful_proposal_type"):
+                confidence += 0.02
+        
         fixture_min_confidence = profile.get("policy", {}).get("min_confidence")
         if fixture_min_confidence not in (None, ""):
             confidence = max(confidence, min(float(fixture_min_confidence), 0.99))
@@ -450,3 +521,95 @@ class ProposalEngine:
             "body": body,
             "structure_reason": structure_reason,
         }
+
+    def _load_brain_context(self, skill_name: str) -> dict[str, Any]:
+        """
+        Load cross-skill context from shared brain.
+        
+        Extracts:
+        - Promotion wisdom for fixtures this skill could benefit from
+        - Regression patterns affecting similar skills
+        - Core directives that apply to this skill
+        - Fixture library suggestions
+        - Skill mastery learnings
+        
+        Args:
+            skill_name: Name of the skill being improved
+        
+        Returns:
+            Dictionary with enriched cross-skill context
+        """
+        if not self.brain:
+            return {}
+        
+        context: dict[str, Any] = {
+            "brain_context": True,
+            "skill_name": skill_name,
+            "promotion_wisdom": [],
+            "regression_patterns": [],
+            "core_directives": [],
+            "skill_mastery": None,
+            "library_suggestions": [],
+        }
+        
+        try:
+            # Load applicable core directives
+            directives = self.brain.get_directives_for_skill(skill_name)
+            context["core_directives"] = [
+                {
+                    "id": d.id,
+                    "title": d.title,
+                    "description": d.description,
+                    "auto_apply": d.auto_apply,
+                }
+                for d in directives
+            ]
+            
+            # Load skill mastery
+            mastery = self.brain.get_or_create_skill_mastery(skill_name)
+            context["skill_mastery"] = {
+                "skill_name": mastery.skill_name,
+                "trial_count": mastery.trial_count,
+                "success_rate": mastery.success_rate,
+                "most_useful_proposal_type": mastery.most_useful_proposal_type,
+                "common_issues": mastery.common_issues,
+            }
+            
+            # Load regression patterns for this skill
+            patterns = self.brain.get_regression_patterns_for_skill(skill_name)
+            context["regression_patterns"] = [
+                {
+                    "id": p.id,
+                    "pattern_name": p.pattern_name,
+                    "description": p.description,
+                    "triggers": p.triggers,
+                    "prevention_rule": p.prevention_rule,
+                    "occurrence_count": p.occurrence_count,
+                    "prevention_success_rate": p.prevention_success_rate,
+                }
+                for p in patterns
+            ]
+            
+            # Load promotion wisdom (all skills, for cross-skill learning)
+            # This helps us apply patterns that worked elsewhere
+            summary = self.brain.summarize_for_skill(skill_name)
+            if summary and "promotion_wisdom" in summary:
+                context["promotion_wisdom"] = summary["promotion_wisdom"]
+            
+            # Load fixture library suggestions
+            library = self.brain.fixture_library.entries
+            if library:
+                context["library_suggestions"] = [
+                    {
+                        "fixture_pattern_name": entry.fixture_pattern_name,
+                        "description": entry.description,
+                        "successful_skills": entry.successful_skills,
+                        "anti_patterns": entry.anti_patterns,
+                    }
+                    for entry in library[:10]  # Top 10 suggestions
+                ]
+        except Exception as e:
+            # Gracefully degrade if brain queries fail
+            context["brain_load_error"] = str(e)
+        
+        return context
