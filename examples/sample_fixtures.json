@@ -1,0 +1,20 @@
+[
+  {
+    "name": "test_output_1",
+    "input_data": {"query": "test"},
+    "expected_output": {
+      "q1_has_output": true,
+      "q2_no_errors": true,
+      "q3_complete": true
+    }
+  },
+  {
+    "name": "test_output_2",
+    "input_data": {"query": "test2"},
+    "expected_output": {
+      "q1_has_output": true,
+      "q2_no_errors": false,
+      "q3_complete": true
+    }
+  }
+]

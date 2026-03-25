@@ -12,6 +12,7 @@ from .proposer import ProposalEngine, PatchProposal
 from .ab_evaluator import ABEvaluator
 from .applier import SkillPatchApplier
 from .operating_memory import OperatingMemory
+from .checklist_evaluator import ChecklistSpec, ChecklistEvaluator, ChecklistResult
 
 
 def _build_change_guard(apply_output: dict[str, Any], policy: dict[str, Any], fixture_policies: dict[str, Any]) -> dict[str, Any]:
@@ -529,6 +530,118 @@ def create_ab_evaluation_stage() -> Stage:
         return ab_report.to_dict()
 
     return ab_evaluate
+
+
+def create_checklist_evaluator_stage(
+    checklist: ChecklistSpec,
+) -> Stage:
+    """
+    Evaluate outputs against a checklist of yes/no questions.
+    Returns a checklist evaluation report with scores and pass/fail per output.
+    """
+    def evaluate(context: dict) -> dict:
+        evaluator = ChecklistEvaluator(checklist)
+        actual_outputs = context.get("actual_outputs", {})
+        
+        if not actual_outputs:
+            amend_output = context.get("amend", {})
+            if amend_output:
+                actual_outputs = {"output": amend_output}
+        
+        report = evaluator.evaluate_all(actual_outputs)
+        return report.to_dict()
+    
+    return evaluate
+
+
+def create_checklist_with_custom_evaluator_stage(
+    checklist: ChecklistSpec,
+    evaluator_fn: callable,
+) -> Stage:
+    """
+    Evaluate outputs using a custom evaluator function (e.g., LLM-based).
+    The function should take (output: dict, question: ChecklistQuestion) -> bool.
+    """
+    def evaluate(context: dict) -> dict:
+        evaluator = ChecklistEvaluator(checklist, evaluator_fn=evaluator_fn)
+        actual_outputs = context.get("actual_outputs", {})
+        
+        if not actual_outputs:
+            amend_output = context.get("amend", {})
+            if amend_output:
+                actual_outputs = {"output": amend_output}
+        
+        report = evaluator.evaluate_all(actual_outputs)
+        return report.to_dict()
+    
+    return evaluate
+
+
+def create_hybrid_evaluation_stage(
+    fixtures: list[GoldenFixture] | None = None,
+    checklist: ChecklistSpec | None = None,
+    require_both: bool = False,
+) -> Stage:
+    """
+    Hybrid evaluation that supports fixture mode, checklist mode, or both.
+    
+    Args:
+        fixtures: Optional golden fixtures for fixture-based evaluation
+        checklist: Optional checklist spec for checklist-based evaluation
+        require_both: If True, both gates must pass. If False, either can pass.
+    
+    Returns:
+        A stage that performs the appropriate evaluations and combines results.
+    """
+    def evaluate(context: dict) -> dict:
+        result = {}
+        actual_outputs = context.get("actual_outputs", {})
+        
+        if not actual_outputs:
+            amend_output = context.get("amend", {})
+            if amend_output:
+                actual_outputs = {"output": amend_output}
+        
+        fixture_result = None
+        checklist_result = None
+        
+        if fixtures:
+            evaluator = GoldenEvaluator(fixtures)
+            fixture_report = evaluator.evaluate_all(actual_outputs)
+            fixture_result = fixture_report.to_dict()
+            result["fixture_evaluation"] = fixture_result
+        
+        if checklist:
+            evaluator = ChecklistEvaluator(checklist)
+            checklist_report = evaluator.evaluate_all(actual_outputs)
+            checklist_result = checklist_report.to_dict()
+            result["checklist_evaluation"] = checklist_result
+        
+        if not fixtures and not checklist:
+            return {"error": "No fixtures or checklist provided"}
+        
+        # Determine overall pass/fail based on mode
+        if require_both and fixture_result and checklist_result:
+            fixture_pass = fixture_result.get("passed", 0) == fixture_result.get("total", 0)
+            checklist_pass = checklist_result.get("total_passed", 0) == checklist_result.get("total_outputs", 0)
+            result["mode"] = "hybrid_both_required"
+            result["passed"] = fixture_pass and checklist_pass
+        elif fixture_result and checklist_result:
+            # Either/or mode
+            fixture_pass = fixture_result.get("passed", 0) == fixture_result.get("total", 0)
+            checklist_pass = checklist_result.get("total_passed", 0) == checklist_result.get("total_outputs", 0)
+            result["mode"] = "hybrid_either_or"
+            result["passed"] = fixture_pass or checklist_pass
+        elif fixture_result:
+            result["mode"] = "fixture_only"
+            result["passed"] = fixture_result.get("passed", 0) == fixture_result.get("total", 0)
+        elif checklist_result:
+            result["mode"] = "checklist_only"
+            result["passed"] = checklist_result.get("total_passed", 0) == checklist_result.get("total_outputs", 0)
+        
+        return result
+    
+    return evaluate
 
 
 def run_once(skill_path: str | Path, logs_dir: str | Path = "./runs") -> RunTrace:

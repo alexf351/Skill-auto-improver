@@ -1,0 +1,28 @@
+{
+  "output_1": {
+    "q1_has_output": true,
+    "q2_no_errors": true,
+    "q3_complete": true,
+    "q4_well_formatted": true,
+    "q5_performance": true,
+    "result": "Successfully processed data",
+    "timestamp": "2026-03-25T07:00:00Z"
+  },
+  "output_2": {
+    "q1_has_output": true,
+    "q2_no_errors": false,
+    "q3_complete": true,
+    "q4_well_formatted": true,
+    "q5_performance": true,
+    "result": "Data processed with warnings",
+    "error": "Some validation warnings present"
+  },
+  "output_3": {
+    "q1_has_output": false,
+    "q2_no_errors": false,
+    "q3_complete": false,
+    "q4_well_formatted": false,
+    "q5_performance": false,
+    "error": "Processing failed"
+  }
+}

@@ -1,4 +1,49 @@
-# Multi-Skill Orchestration - Shipped Artifacts
+# Shipped Artifacts
+
+## Latest: Memory-Driven Proposal Ranking (2026-03-24 Afternoon)
+
+**Date:** 2026-03-24 (14:00-15:00 UTC)  
+**Task:** Autonomous build block for highest-leverage proposal intelligence  
+**Status:** ✅ COMPLETE
+
+### What Shipped
+
+**New Module:** `src/skill_auto_improver/memory_ranking.py` (380 lines)
+- `FixtureSuccessRecord`: Per-fixture acceptance/rejection tracking
+- `FixtureSimilarity`: Similarity scoring between fixtures
+- `MemoryDrivenRanker`: Intelligent proposal reordering based on history
+
+**Key Features:**
+1. **Direct History** - Rank by what works for this specific fixture
+2. **Recency Bonus** - Recent successes weight more than old ones (7-day decay)
+3. **Difficulty Adjustment** - Hard fixtures prioritize reliable proposal types
+4. **Similarity Borrowing** - New fixtures learn from similar ones
+5. **Persistence** - Cross-session memory via `fixture-success.jsonl`
+
+**Testing:** 27 new unit tests
+- All test scenarios passing ✅
+- Edge cases covered (empty lists, missing fixtures, persistence)
+- Integration with mock proposals
+
+**Examples:** `examples/memory_driven_ranking_demo.py`
+- 5 concrete scenarios demonstrating ranking intelligence
+- Runs successfully, shows all features in action
+
+### Impact
+
+- Proposals now automatically reorder based on per-fixture history
+- New fixtures intelligently borrow success patterns from similar ones
+- Difficult fixtures get safer, more reliable proposals ranked first
+- Success memory persists across sessions for long-term learning
+
+### Test Coverage
+- **Total:** 174 tests (147 existing + 27 new)
+- **Status:** All passing ✅
+- **Run time:** 0.64s
+
+---
+
+## Previous: Multi-Skill Orchestration - Shipped Artifacts (2026-03-24 Early)
 
 **Date:** 2026-03-24  
 **Task:** 4-hour subagent session for multi-skill shared brain + orchestration  

@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .evaluator import GoldenFixture
-from .loop import create_safe_patch_trial_stage, _update_trace_metadata
+from .loop import create_safe_patch_trial_stage, _update_trace_metadata, create_hybrid_evaluation_stage
 from .operating_memory import scaffold_operating_memory, OperatingMemory
 from .applier import SkillPatchApplier
 from .models import RunTrace, StepResult
 from .logger import TraceLogger
+from .checklist_evaluator import ChecklistLoader, ChecklistEvaluator
 
 
 def _load_json(path: str | Path) -> Any:
@@ -228,6 +229,46 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument("--skill-path", required=True, help="Path to the target skill folder")
     history.add_argument("--limit", type=int, default=5, help="Number of recent trial history entries to show")
 
+    checklist = subparsers.add_parser(
+        "evaluate-checklist",
+        help="Evaluate outputs against a checklist of yes/no questions.",
+    )
+    checklist.add_argument("--skill-path", required=True, help="Path to the target skill folder")
+    checklist.add_argument("--checklist", required=True, help="Path to checklist JSON file")
+    checklist.add_argument(
+        "--outputs",
+        required=False,
+        help="Path to JSON file with outputs to evaluate (dict or list)",
+    )
+    checklist.add_argument(
+        "--logs-dir",
+        default=None,
+        help="Optional directory to persist a structured evaluation trace JSON",
+    )
+
+    hybrid = subparsers.add_parser(
+        "evaluate-hybrid",
+        help="Evaluate using both fixture and checklist modes (configurable gates).",
+    )
+    hybrid.add_argument("--skill-path", required=True, help="Path to the target skill folder")
+    hybrid.add_argument("--fixtures", required=False, help="Path to golden fixture JSON file")
+    hybrid.add_argument("--checklist", required=False, help="Path to checklist JSON file")
+    hybrid.add_argument(
+        "--require-both",
+        action="store_true",
+        help="Require both fixture AND checklist to pass (default: either/or)",
+    )
+    hybrid.add_argument(
+        "--outputs",
+        required=False,
+        help="Path to JSON file with outputs to evaluate",
+    )
+    hybrid.add_argument(
+        "--logs-dir",
+        default=None,
+        help="Optional directory to persist a structured evaluation trace JSON",
+    )
+
     return parser
 
 
@@ -281,6 +322,58 @@ def main(argv: list[str] | None = None) -> int:
             "operating_memory": memory.load_context(),
             "recent_trials": _read_jsonl_tail(history_path, limit=args.limit),
         }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "evaluate-checklist":
+        checklist = ChecklistLoader.load_from_file(args.checklist)
+        evaluator = ChecklistEvaluator(checklist)
+        
+        if args.outputs:
+            outputs = _load_json(args.outputs)
+        else:
+            outputs = {}
+        
+        report = evaluator.evaluate_all(outputs)
+        result = {
+            "skill_path": args.skill_path,
+            "checklist_name": checklist.name,
+            "evaluation": report.to_dict(),
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "evaluate-hybrid":
+        fixtures = None
+        checklist = None
+        
+        if args.fixtures:
+            fixtures = load_fixtures(args.fixtures)
+        if args.checklist:
+            checklist = ChecklistLoader.load_from_file(args.checklist)
+        
+        if not fixtures and not checklist:
+            print(json.dumps({
+                "error": "At least one of --fixtures or --checklist must be provided"
+            }, indent=2, sort_keys=True))
+            return 1
+        
+        stage = create_hybrid_evaluation_stage(
+            fixtures=fixtures,
+            checklist=checklist,
+            require_both=args.require_both,
+        )
+        
+        if args.outputs:
+            outputs = _load_json(args.outputs)
+            context = {"actual_outputs": outputs}
+        else:
+            context = {}
+        
+        result = stage(context)
+        result["skill_path"] = args.skill_path
+        result["require_both"] = args.require_both
+        
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 

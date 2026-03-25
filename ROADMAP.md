@@ -216,11 +216,25 @@ Expand to multi-skill orchestration with shared learning across skills.
   - Full integration flow
 - **Total: 147 unit tests, all passing** (+10 from integration tests)
 
+### 2026-03-24 (Afternoon Build Block): Memory-Driven Proposal Ranking
+- Implemented `MemoryDrivenRanker` in `src/skill_auto_improver/memory_ranking.py` for intelligent proposal reordering
+- Added `FixtureSuccessRecord` to track per-fixture proposal outcomes (accepted/rejected)
+- Added `FixtureSimilarity` for finding similar fixtures and borrowing success patterns
+- Ranking considers:
+  - Direct acceptance rate for proposal type on specific fixture
+  - Recency bonus (recent successes weight more heavily)
+  - Difficulty adjustment (hard fixtures prioritize reliable types)
+  - Similarity borrowing (similar fixtures' success guides unknown fixtures)
+- Added structured persistence to `data/fixture-success.jsonl` for cross-session memory
+- Added 27 new unit tests covering all ranking scenarios and edge cases
+- Added interactive demo: `examples/memory_driven_ranking_demo.py` with 5 scenarios
+- **Total: 174 unit tests, all passing** (+27 from memory ranking)
+
 ## Next Highest-Leverage Increment
-- Memory-driven proposal ranking - Full reordering based on per-fixture success history
 - Fixture suggestion CLI - Recommend library patterns for new fixtures
-- Operator dashboard CLI - Browse brain state and recent trials
+- Operator dashboard CLI - Browse brain state and recent trials  
 - Automated promotion rules - Apply learned acceptance rules without operator review
+- Loop integration - Wire memory-driven ranker into guarded trial loop
 
 ### 2026-03-23: Trace-Aware Observe/Inspect Stages
 - Added `load_traces()` + `summarize_traces()` in `logger.py` so recent run logs can be consumed as structured operating signals instead of only archived JSON

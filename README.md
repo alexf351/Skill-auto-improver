@@ -14,7 +14,52 @@ With built-in **rollback safety** and **version history**.
 
 ## What's Shipped
 
-### ✅ Proposer + SharedBrain Integration (2026-03-24, Latest)
+### ✅ Checklist-Based Scoring Mode (2026-03-25, Latest)
+
+**File:** `src/skill_auto_improver/checklist_evaluator.py`
+
+Flexible yes/no question-based evaluation alongside fixture mode:
+
+- **ChecklistEvaluator**: Evaluate outputs against 3-6 quality questions
+- **Rule-based evaluation**: Direct field matching, `has_field_*`, `is_non_empty_*` patterns
+- **Custom evaluator support**: Pass LLM-based evaluation functions for complex logic
+- **Scoring**: 0-100% per output based on questions answered
+- **Hybrid mode**: Run both fixture and checklist gates (AND/OR logic)
+- **CLI integration**: `evaluate-checklist` and `evaluate-hybrid` commands
+
+**Three Evaluation Modes:**
+1. **Fixture mode**: Exact output matching (existing)
+2. **Checklist mode**: Quality gate validation (new)
+3. **Hybrid mode**: Both gates with configurable logic (new)
+
+**Example Checklist:**
+```json
+{
+  "name": "skill_quality",
+  "questions": [
+    {"id": "q1", "question": "Has output?", "required": true},
+    {"id": "q2", "question": "No errors?", "required": true},
+    {"id": "q3", "question": "Well-formatted?", "required": false}
+  ]
+}
+```
+
+**Scoring & Reporting:**
+- Per-output score (0-100%)
+- Aggregated pass rate across outputs
+- Average score across all outputs
+- Result tracking for before/after comparison
+
+**Integration:**
+- Integrates with safe-patch-trial workflow
+- Same keep/revert logic as fixtures
+- Works with operating-memory promotion profiles
+- CLI: `evaluate-checklist`, `evaluate-hybrid`
+
+**Tests:** 24 comprehensive unit tests (all passing)
+**Docs:** `CHECKLIST_MODE.md` with examples, API, best practices
+
+### ✅ Proposer + SharedBrain Integration (2026-03-24)
 
 **File:** `src/skill_auto_improver/proposer.py` (enhanced)
 

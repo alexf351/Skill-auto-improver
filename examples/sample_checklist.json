@@ -1,0 +1,35 @@
+{
+  "name": "skill_output_validation",
+  "questions": [
+    {
+      "id": "q1_has_output",
+      "question": "Does the output contain a result?",
+      "description": "Check if output has some meaningful content",
+      "required": true
+    },
+    {
+      "id": "q2_no_errors",
+      "question": "Are there no error messages in the output?",
+      "description": "Check for absence of errors",
+      "required": true
+    },
+    {
+      "id": "q3_complete",
+      "question": "Is the output complete (not truncated)?",
+      "description": "Verify output is fully formed",
+      "required": true
+    },
+    {
+      "id": "q4_well_formatted",
+      "question": "Is the output well-formatted and readable?",
+      "description": "Check formatting and structure",
+      "required": false
+    },
+    {
+      "id": "q5_performance",
+      "question": "Did the operation complete within reasonable time?",
+      "description": "Check performance metrics",
+      "required": false
+    }
+  ]
+}
