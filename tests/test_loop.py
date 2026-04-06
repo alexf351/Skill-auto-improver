@@ -17,8 +17,9 @@ from skill_auto_improver.loop import (
     create_amendment_proposal_stage,
     create_recent_run_observer_stage,
     create_trace_inspect_stage,
+    create_trial_workspace_stage,
 )
-from skill_auto_improver.evaluator import GoldenFixture
+from skill_auto_improver.evaluator import GoldenEvaluator, GoldenFixture
 
 
 class LoopTests(unittest.TestCase):
@@ -28,19 +29,19 @@ class LoopTests(unittest.TestCase):
             improver = SkillAutoImprover(
                 observe=lambda c: {"signals": ["lint_warning"]},
                 inspect=lambda c: {"hypothesis": "instruction issue", "seen": bool(c.get("observe"))},
-                amend=lambda c: {"patch": "replace weak instruction", "from_inspect": c["inspect"]["hypothesis"]},
+                amend=lambda c: {"patch": "replace weak instruction"},
                 evaluate=lambda c: {"score_delta": 0.2, "accepted": True, "from_amend": bool(c.get("amend"))},
             )
             trace = improver.run_once(skill_path="/tmp/skill", logs_dir=logs)
             self.assertEqual(trace.status, "ok")
-            self.assertEqual([s.name for s in trace.steps], ["observe", "inspect", "amend", "evaluate"])
+            self.assertEqual([s.name for s in trace.steps], ["observe", "amend", "inspect", "evaluate"])
             written = list(logs.glob("*.json"))
             self.assertEqual(len(written), 1)
             payload = json.loads(written[0].read_text(encoding="utf-8"))
             self.assertEqual(payload["trace_version"], 1)
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(len(payload["steps"]), 4)
-            self.assertEqual(payload["steps"][1]["output"]["seen"], True)
+            self.assertEqual(payload["steps"][2]["output"]["seen"], True)
             self.assertEqual(payload["steps"][3]["output"]["accepted"], True)
 
     def test_pipeline_failure_marks_error_and_stops(self):
@@ -58,7 +59,7 @@ class LoopTests(unittest.TestCase):
             )
             trace = improver.run_once(skill_path="/tmp/skill", logs_dir=logs)
             self.assertEqual(trace.status, "error")
-            self.assertEqual([s.name for s in trace.steps], ["observe", "inspect"])
+            self.assertEqual([s.name for s in trace.steps], ["observe", "amend", "inspect"])
             self.assertIn("error", trace.steps[-1].output)
 
     def test_default_noop_runner(self):
@@ -133,6 +134,49 @@ class LoopTests(unittest.TestCase):
             artifact = next(proposal for proposal in result['proposals'] if proposal['type'] == 'artifact')
             self.assertEqual(artifact['content']['target_path'], 'docs/auto-improver/greeting_test.md')
             self.assertIn('Memory hints', result['proposals'][0]['description'])
+
+    def test_amendment_stage_can_seed_evaluation_from_golden_evaluator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / 'demo-skill'
+            skill_dir.mkdir()
+            fixtures = [
+                GoldenFixture(
+                    name='greeting_test',
+                    input_data={'name': 'Alice'},
+                    expected_output={'greeting': 'Hello, Alice!'},
+                )
+            ]
+            stage = create_amendment_proposal_stage(golden_evaluator=GoldenEvaluator(fixtures))
+            result = stage({
+                'skill_path': str(skill_dir),
+                'actual_outputs': {
+                    'greeting_test': {'greeting': 'Hi, Alice!'}
+                },
+            })
+
+            self.assertGreater(len(result['proposals']), 0)
+            self.assertIn('evaluation_seed', result)
+            self.assertEqual(result['evaluation_seed']['failed'], 1)
+            self.assertEqual(result['evaluation_seed']['results'][0]['fixture_name'], 'greeting_test')
+
+    def test_amendment_stage_does_not_seed_without_actual_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / 'demo-skill'
+            skill_dir.mkdir()
+            fixtures = [
+                GoldenFixture(
+                    name='greeting_test',
+                    input_data={'name': 'Alice'},
+                    expected_output={'greeting': 'Hello, Alice!'},
+                )
+            ]
+            stage = create_amendment_proposal_stage(golden_evaluator=GoldenEvaluator(fixtures))
+            result = stage({
+                'skill_path': str(skill_dir),
+            })
+
+            self.assertEqual(result['total_proposals'], 0)
+            self.assertNotIn('evaluation_seed', result)
 
     def test_safe_patch_trial_accepts_non_regressing_patch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,6 +298,39 @@ class LoopTests(unittest.TestCase):
             self.assertIn('below minimum 0.90', result['apply']['skipped'][0]['detail'])
             self.assertEqual(result['acceptance_reason'], 'no proposals applied')
 
+    def test_safe_patch_trial_prefers_ranked_proposals_over_raw_amend_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / 'demo-skill'
+            skill_dir.mkdir()
+            (skill_dir / 'SKILL.md').write_text('# Demo Skill\n', encoding='utf-8')
+            fixtures = [GoldenFixture(name='greeting_test', input_data={'name': 'Alice'}, expected_output={'greeting': 'Hello, Alice!'})]
+
+            def evaluate_skill(skill_path: str, context: dict, phase: str) -> dict:
+                content = (Path(skill_path) / 'SKILL.md').read_text(encoding='utf-8')
+                greeting = 'Hello, Alice!' if 'Use the formal greeting.' in content else 'Hi, Alice!'
+                return {'greeting_test': {'greeting': greeting}}
+
+            result = create_safe_patch_trial_stage(
+                fixtures,
+                evaluate_skill,
+                accepted_types={'instruction'},
+                min_confidence=0.9,
+            )({
+                'skill_path': str(skill_dir),
+                'amend': {'proposals': [
+                    {'fixture_name': 'greeting_test', 'type': 'instruction', 'description': 'Low-confidence raw proposal', 'content': {'suggestion': 'Do not use the formal greeting.', 'mismatched_fields': ['greeting']}, 'severity': 'warning', 'confidence': 0.2},
+                ]},
+                'rank': {'proposals': [
+                    {'fixture_name': 'greeting_test', 'type': 'instruction', 'description': 'High-confidence ranked proposal', 'content': {'suggestion': 'Use the formal greeting.', 'mismatched_fields': ['greeting']}, 'severity': 'warning', 'confidence': 0.95},
+                ]},
+            })
+
+            self.assertTrue(result['accepted'])
+            self.assertEqual(result['apply']['applied_count'], 1)
+            self.assertEqual(result['apply']['skipped_count'], 0)
+            self.assertIn('Use the formal greeting.', (skill_dir / 'SKILL.md').read_text(encoding='utf-8'))
+            self.assertNotIn('Do not use the formal greeting.', (skill_dir / 'SKILL.md').read_text(encoding='utf-8'))
+
     def test_recent_run_observer_summarizes_trace_history_for_skill(self):
         with tempfile.TemporaryDirectory() as tmp:
             logs_dir = Path(tmp) / 'runs'
@@ -273,6 +350,19 @@ class LoopTests(unittest.TestCase):
                         'applied_count': 1,
                     }
                 },
+                'steps': [
+                    {
+                        'name': 'apply_trial',
+                        'output': {
+                            'ab': {
+                                'comparisons': [
+                                    {'fixture_name': 'greeting_test', 'status': 'regressed'},
+                                    {'fixture_name': 'tone_test', 'status': 'regressed'},
+                                ]
+                            }
+                        }
+                    }
+                ],
             }
             second_trace = {
                 'run_id': 'run-2',
@@ -289,6 +379,18 @@ class LoopTests(unittest.TestCase):
                         'applied_count': 0,
                     }
                 },
+                'steps': [
+                    {
+                        'name': 'apply_trial',
+                        'output': {
+                            'ab': {
+                                'comparisons': [
+                                    {'fixture_name': 'greeting_test', 'status': 'stable_fail'},
+                                ]
+                            }
+                        }
+                    }
+                ],
             }
             unrelated_trace = {
                 'run_id': 'run-3',
@@ -316,8 +418,12 @@ class LoopTests(unittest.TestCase):
             self.assertEqual(result['total_regressions'], 2)
             self.assertEqual(result['acceptance_reasons']['regression detected'], 1)
             self.assertEqual(result['acceptance_reasons']['no proposals applied'], 1)
+            self.assertEqual(result['fixture_hotspots']['regressed'][0]['fixture_name'], 'greeting_test')
+            self.assertEqual(result['fixture_hotspots']['regressed'][0]['count'], 1)
+            self.assertEqual(result['fixture_hotspots']['stable_fail'][0]['fixture_name'], 'greeting_test')
             self.assertIn('recent regressions detected: 2', result['signals'])
             self.assertIn('recent runs had blocked or unsupported proposals', result['signals'])
+            self.assertIn('fixture hotspot: greeting_test regressed 1x recently', result['signals'])
 
     def test_trace_inspect_stage_prioritizes_policy_and_regression_work(self):
         inspect = create_trace_inspect_stage()
@@ -330,14 +436,70 @@ class LoopTests(unittest.TestCase):
                     'promoted baseline regression': 1,
                     'no proposals applied': 2,
                 },
+                'fixture_hotspots': {
+                    'regressed': [{'fixture_name': 'greeting_test', 'count': 3}],
+                    'recovered': [],
+                    'stable_fail': [],
+                },
             }
         })
 
         self.assertIn('protect promoted fixtures before attempting broader amendments', result['priorities'])
         self.assertIn('improve proposal applicability or operator-policy alignment', result['priorities'])
+        self.assertIn("focus the next amendment on hotspot fixture 'greeting_test' before broad edits", result['priorities'])
         self.assertIn('good proposals are being filtered out by type/confidence/severity gates', result['hypotheses'])
+        self.assertIn("fixture 'greeting_test' is absorbing repeated regressions and likely needs narrower, fixture-specific coverage", result['hypotheses'])
         self.assertEqual(result['recent_failure_count'], 1)
         self.assertEqual(result['recent_success_count'], 0)
+
+    def test_amendment_stage_uses_inspect_hotspot_to_narrow_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / 'demo-skill'
+            skill_dir.mkdir()
+            stage = create_amendment_proposal_stage()
+
+            result = stage({
+                'skill_path': str(skill_dir),
+                'inspect': {
+                    'priorities': ["focus the next amendment on hotspot fixture 'greeting_test' before broad edits"],
+                    'hypotheses': ['narrower targeting needed'],
+                    'fixture_hotspots': {
+                        'regressed': [{'fixture_name': 'greeting_test', 'count': 3}],
+                        'stable_fail': [],
+                        'recovered': [],
+                    },
+                },
+                'evaluate': {
+                    'results': [
+                        {
+                            'fixture_name': 'other_test',
+                            'passed': False,
+                            'expected': {'greeting': 'Hello'},
+                            'actual': {'greeting': 'Hi'},
+                            'delta': {'greeting': {'expected': 'Hello', 'actual': 'Hi'}},
+                            'reason': 'Mismatch',
+                        },
+                        {
+                            'fixture_name': 'greeting_test',
+                            'passed': False,
+                            'expected': {'greeting': 'Hello, Alice!'},
+                            'actual': {'greeting': 'Hi, Alice'},
+                            'delta': {'greeting': {'expected': 'Hello, Alice!', 'actual': 'Hi, Alice'}},
+                            'reason': 'Mismatch',
+                        },
+                    ]
+                },
+            })
+
+            self.assertEqual(result['proposals'][0]['fixture_name'], 'greeting_test')
+            self.assertEqual(result['proposals'][0]['type'], 'test_case')
+            hotspot_instruction = next(
+                proposal for proposal in result['proposals']
+                if proposal['fixture_name'] == 'greeting_test' and proposal['type'] == 'instruction'
+            )
+            self.assertEqual(hotspot_instruction['content']['scope']['mode'], 'fixture_hotspot')
+            self.assertTrue(hotspot_instruction['content']['scope']['fixture_local_only'])
+            self.assertIn('fixture-local', hotspot_instruction['description'])
 
     def test_safe_patch_trial_rolls_back_when_it_breaks_promoted_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -519,6 +681,43 @@ class LoopTests(unittest.TestCase):
             self.assertFalse(result['change_guard']['is_safe'])
             self.assertIn('changed target count 2 exceeds limit 1', result['change_guard']['exceeded'])
 
+    def test_safe_patch_trial_ignores_unapplied_fixture_change_budget_constraints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / 'demo-skill'
+            skill_dir.mkdir()
+            (skill_dir / 'SKILL.md').write_text('# Demo Skill\n', encoding='utf-8')
+            (skill_dir / 'data').mkdir()
+            (skill_dir / 'data' / 'preferences.json').write_text(json.dumps({
+                'proposal': {
+                    'max_changed_targets': 2,
+                    'fixture_policies': {
+                        'blocked_fixture': {
+                            'max_changed_targets': 1,
+                            'max_added_lines': 1,
+                        }
+                    },
+                }
+            }), encoding='utf-8')
+            fixtures = [GoldenFixture(name='greeting_test', input_data={'name': 'Alice'}, expected_output={'greeting': 'Hello, Alice!'})]
+
+            def evaluate_skill(skill_path: str, context: dict, phase: str) -> dict:
+                content = (Path(skill_path) / 'SKILL.md').read_text(encoding='utf-8')
+                greeting = 'Hello, Alice!' if 'formal greeting' in content else 'Hi, Alice!'
+                return {'greeting_test': {'greeting': greeting}}
+
+            result = create_safe_patch_trial_stage(fixtures, evaluate_skill)({
+                'skill_path': str(skill_dir),
+                'amend': {'proposals': [
+                    {'fixture_name': 'greeting_test', 'type': 'instruction', 'description': 'Tighten greeting instructions', 'content': {'suggestion': 'Use the formal greeting.', 'mismatched_fields': ['greeting']}, 'severity': 'warning', 'confidence': 0.95},
+                    {'fixture_name': 'greeting_test', 'type': 'test_case', 'description': 'Add regression test', 'content': {'fixture': {'name': 'greeting_test_regression', 'input_data': {'name': 'Alice'}, 'expected_output': {'greeting': 'Hello, Alice!'}}}, 'severity': 'info', 'confidence': 0.95},
+                ]},
+            })
+            self.assertTrue(result['accepted'])
+            self.assertFalse(result['rolled_back'])
+            self.assertTrue(result['change_guard']['is_safe'])
+            self.assertEqual(result['change_guard']['max_changed_targets'], 2)
+            self.assertEqual(result['change_guard']['fixture_constraints'], {})
+
     def test_run_once_persists_patch_trial_summary_in_trace_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             logs = Path(tmp) / "runs"
@@ -547,6 +746,60 @@ class LoopTests(unittest.TestCase):
             self.assertEqual(trace.metadata["patch_trial"]["acceptance_reason"], 'regression detected')
             self.assertEqual(trace.metadata["patch_trial"]["promotion_guard"], None)
             self.assertEqual(trace.metadata["patch_trial"]["promotion"], None)
+
+    def test_trial_workspace_stage_compiles_dossier_from_skill_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "demo-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\n\n# Demo Skill\n", encoding="utf-8")
+            (skill_dir / "data").mkdir()
+            (skill_dir / "data" / "preferences.json").write_text(json.dumps({"proposal": {"min_confidence": 0.9, "prefer_types": ["instruction"]}}), encoding="utf-8")
+            stage = create_trial_workspace_stage(
+                fixtures=[GoldenFixture(name="greeting_test", input_data={"path": "SKILL.md"}, expected_output={"contains": ["Demo Skill"]})],
+                policy={"min_confidence": 0.9, "accepted_severities": ["warning", "critical"]},
+            )
+
+            result = stage({
+                "skill_path": str(skill_dir),
+                "amend": {
+                    "proposals": [
+                        {
+                            "fixture_name": "greeting_test",
+                            "type": "instruction",
+                            "description": "Tighten instructions",
+                            "content": {"suggestion": "Use the formal greeting."},
+                            "severity": "warning",
+                            "confidence": 0.85,
+                        }
+                    ]
+                },
+            })
+
+            self.assertEqual(result["skill_summary"]["skill_md_exists"], True)
+            self.assertEqual(result["fixtures"][0]["name"], "greeting_test")
+            self.assertEqual(result["proposals"][0]["type"], "instruction")
+            self.assertIn("all proposals currently sit below the active confidence floor", result["warnings"])
+            self.assertGreaterEqual(len(result["warnings"]), 1)
+
+    def test_skill_auto_improver_can_run_workspace_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = Path(tmp) / "runs"
+            skill_dir = Path(tmp) / "skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("# Demo Skill\n", encoding="utf-8")
+            improver = SkillAutoImprover(
+                observe=lambda c: {"signals": ["ok"]},
+                amend=lambda c: {"proposals": []},
+                workspace=create_trial_workspace_stage(),
+                inspect=lambda c: {"workspace_seen": bool(c.get("workspace"))},
+                evaluate=lambda c: {"done": True},
+            )
+            trace = improver.run_once(skill_path=str(skill_dir), logs_dir=logs)
+            if trace.status != "ok":
+                self.fail(trace.steps[2].output)
+            self.assertNotIn("error", trace.steps[2].output)
+            self.assertEqual([s.name for s in trace.steps], ["observe", "amend", "workspace", "inspect", "evaluate"])
+            self.assertTrue(trace.steps[3].output["workspace_seen"])
 
 
 if __name__ == "__main__":

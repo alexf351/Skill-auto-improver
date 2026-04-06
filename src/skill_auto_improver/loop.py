@@ -13,19 +13,25 @@ from .ab_evaluator import ABEvaluator
 from .applier import SkillPatchApplier
 from .operating_memory import OperatingMemory
 from .checklist_evaluator import ChecklistSpec, ChecklistEvaluator, ChecklistResult
+from .memory_ranking import MemoryDrivenRanker
+from .trial_workspace import TrialWorkspaceCompiler
 
 
 def _build_change_guard(apply_output: dict[str, Any], policy: dict[str, Any], fixture_policies: dict[str, Any]) -> dict[str, Any]:
     applied = apply_output.get("applied", [])
     changed_targets = sorted({change.get("target_path", "") for change in applied if change.get("target_path")})
     total_added_lines = sum(((change.get("diff_summary") or {}).get("added_lines", 0) for change in applied))
-    fixture_names = {change.get("fixture_name") for change in []}
+    changed_fixture_names = {
+        change.get("fixture_name")
+        for change in applied
+        if change.get("fixture_name")
+    }
     effective_max_changed_targets = policy.get("max_changed_targets")
     effective_max_added_lines = policy.get("max_added_lines")
 
     constrained_fixtures: dict[str, dict[str, Any]] = {}
     for fixture_name, fixture_policy in fixture_policies.items():
-        if not isinstance(fixture_policy, dict):
+        if not isinstance(fixture_policy, dict) or fixture_name not in changed_fixture_names:
             continue
         constrained_fixtures[fixture_name] = {
             "max_changed_targets": fixture_policy.get("max_changed_targets"),
@@ -87,13 +93,43 @@ def _dict_to_evaluation_report(d: dict[str, Any]) -> EvaluationReport:
     )
 
 
+def _proposal_source(context: dict[str, Any]) -> dict[str, Any]:
+    ranked_output = context.get("rank")
+    if isinstance(ranked_output, dict) and "proposals" in ranked_output:
+        return ranked_output
+    amend_output = context.get("amend")
+    if isinstance(amend_output, dict):
+        return amend_output
+    return {}
+
+
 def _update_trace_metadata(trace: RunTrace, step_name: str, output: dict[str, Any]) -> None:
     if step_name == "evaluate" and {"total", "passed", "failed"}.issubset(output.keys()):
         trace.metadata["evaluation"] = {
+            "mode": "golden",
             "total": output.get("total", 0),
             "passed": output.get("passed", 0),
             "failed": output.get("failed", 0),
             "pass_rate": output.get("pass_rate", 0.0),
+        }
+    elif step_name == "evaluate" and {"checklist_name", "total_outputs", "total_passed"}.issubset(output.keys()):
+        trace.metadata["evaluation"] = {
+            "mode": "checklist",
+            "checklist_name": output.get("checklist_name", ""),
+            "total_outputs": output.get("total_outputs", 0),
+            "total_passed": output.get("total_passed", 0),
+            "pass_rate": output.get("pass_rate", 0.0),
+            "average_score": output.get("average_score", 0.0),
+        }
+    elif step_name == "evaluate" and output.get("mode") in {"fixture_only", "checklist_only", "hybrid_either_or", "hybrid_both_required"}:
+        fixture_eval = output.get("fixture_evaluation", {})
+        checklist_eval = output.get("checklist_evaluation", {})
+        trace.metadata["evaluation"] = {
+            "mode": output.get("mode"),
+            "passed": output.get("passed", False),
+            "fixture_pass_rate": fixture_eval.get("pass_rate"),
+            "checklist_pass_rate": checklist_eval.get("pass_rate"),
+            "checklist_average_score": checklist_eval.get("average_score"),
         }
 
     if {"accepted", "rolled_back", "ab", "apply"}.issubset(output.keys()):
@@ -136,19 +172,33 @@ class SkillAutoImprover:
     inspect: Stage
     amend: Stage
     evaluate: Stage
+    workspace: Stage | None = None
+    rank: Stage | None = None
     stage_order: list[str] | None = None
 
     def run_once(self, skill_path: str | Path, logs_dir: str | Path = "./runs") -> RunTrace:
         trace = RunTrace(skill_path=str(skill_path))
         context: dict = {"skill_path": str(skill_path), "trace_id": trace.run_id}
 
-        order = self.stage_order or ["observe", "inspect", "amend", "evaluate"]
+        default_order = ["observe", "amend"]
+        if self.workspace:
+            default_order.append("workspace")
+        default_order.extend(["inspect"])
+        if self.rank:
+            default_order.append("rank")
+        default_order.append("evaluate")
+
+        order = self.stage_order or default_order
         stages = {
             "observe": self.observe,
             "inspect": self.inspect,
             "amend": self.amend,
             "evaluate": self.evaluate,
         }
+        if self.workspace:
+            stages["workspace"] = self.workspace
+        if self.rank:
+            stages["rank"] = self.rank
 
         for name in order:
             if name not in stages:
@@ -199,11 +249,38 @@ def create_recent_run_observer_stage(
             signals.append("promotion-history protection was triggered recently")
         if summary["total_recoveries"] > 0:
             signals.append(f"recent recoveries landed: {summary['total_recoveries']}")
+        hottest_regressed = (summary.get("fixture_hotspots") or {}).get("regressed", [])
+        if hottest_regressed:
+            top = hottest_regressed[0]
+            signals.append(f"fixture hotspot: {top['fixture_name']} regressed {top['count']}x recently")
         summary["signals"] = signals
         summary["logs_dir"] = str(logs_dir)
         return summary
 
     return observe
+
+
+def create_trial_workspace_stage(
+    *,
+    fixtures: list[GoldenFixture] | None = None,
+    policy: dict[str, Any] | None = None,
+    logs_dir: str | Path | None = None,
+) -> Stage:
+    def build_workspace(context: dict) -> dict:
+        skill_path = context.get("skill_path")
+        if not skill_path:
+            return {"error": "Missing skill_path in context"}
+
+        proposal_source = _proposal_source(context)
+        compiler = TrialWorkspaceCompiler(skill_path, logs_dir=logs_dir)
+        report = compiler.compile(
+            fixtures=fixtures,
+            proposals=proposal_source.get("proposals", []),
+            policy=policy or context.get("policy") or {},
+        )
+        return report.to_dict()
+
+    return build_workspace
 
 
 def create_trace_inspect_stage() -> Stage:
@@ -222,9 +299,27 @@ def create_trace_inspect_stage() -> Stage:
         if acceptance_reasons.get("regression detected"):
             priorities.append("prefer smallest reversible changes with explicit regression-fixture coverage")
             hypotheses.append("patches are overreaching and should add test-case proposals alongside instruction edits")
+
+        hottest_regressed = (observe_output.get("fixture_hotspots") or {}).get("regressed", [])
+        if hottest_regressed:
+            top = hottest_regressed[0]
+            priorities.append(f"focus the next amendment on hotspot fixture '{top['fixture_name']}' before broad edits")
+            hypotheses.append(f"fixture '{top['fixture_name']}' is absorbing repeated regressions and likely needs narrower, fixture-specific coverage")
         if acceptance_reasons.get("no proposals applied"):
             priorities.append("improve proposal applicability or operator-policy alignment")
             hypotheses.append("good proposals are being filtered out by type/confidence/severity gates")
+
+        workspace = context.get("workspace", {})
+        for warning in workspace.get("warnings", []):
+            if warning == "fixtures exist but no proposals supplied":
+                priorities.append("generate or source candidate proposals for the known failing fixtures")
+                hypotheses.append("the current loop has evaluation context but lacks amendment inputs")
+            elif warning == "proposals exist without fixture context":
+                priorities.append("restore fixture-backed verification before mutating the skill")
+                hypotheses.append("proposal generation has become detached from measurable success criteria")
+            elif warning == "all proposals currently sit below the active confidence floor":
+                priorities.append("either raise proposal quality or relax policy gates intentionally")
+                hypotheses.append("useful changes are being blocked by confidence thresholds rather than regression safety")
         if observe_output.get("trace_count", 0) == 0:
             priorities.append("establish baseline trial data before optimizing policy")
             hypotheses.append("there is not enough run history yet to bias proposal strategy")
@@ -238,6 +333,7 @@ def create_trace_inspect_stage() -> Stage:
             "recent_failure_count": len(observe_output.get("latest_failures", [])),
             "recent_success_count": len(observe_output.get("latest_successes", [])),
             "acceptance_reasons": acceptance_reasons,
+            "fixture_hotspots": observe_output.get("fixture_hotspots", {}),
         }
 
     return inspect
@@ -266,6 +362,11 @@ def create_amendment_proposal_stage(
     def amend(context: dict) -> dict:
         engine = ProposalEngine()
         eval_output = context.get("evaluate", {})
+        if not eval_output.get("results") and golden_evaluator is not None:
+            actual_outputs = context.get("actual_outputs", {})
+            if actual_outputs:
+                eval_output = golden_evaluator.evaluate_all(actual_outputs).to_dict()
+
         eval_results = eval_output.get("results", [])
 
         skill_path = context.get("skill_path")
@@ -289,11 +390,104 @@ def create_amendment_proposal_stage(
         proposal_report = engine.generate_proposals(
             failed_results,
             operating_memory=memory_context,
+            inspect_context=context.get("inspect"),
             skill_path=skill_path,
         )
-        return proposal_report.to_dict()
+        result = proposal_report.to_dict()
+        if eval_output.get("results") and not context.get("evaluate"):
+            result["evaluation_seed"] = eval_output
+        return result
 
     return amend
+
+
+def create_proposal_ranking_stage() -> Stage:
+    """Reorder proposals using memory-driven fixture success history.
+    
+    Uses MemoryDrivenRanker to intelligently order proposals based on:
+    - Which proposal types succeeded for each fixture before
+    - Fixture difficulty (harder fixtures get safer proposals first)
+    - Cross-fixture similarity (learn from similar fixtures)
+    - Recency weighting (recent successes matter more)
+    
+    Proposals are reordered in-place in the output, preserving all metadata.
+    Non-existent rank files are handled gracefully (no ranking applied).
+    """
+    def rank_proposals(context: dict) -> dict:
+        skill_path = context.get("skill_path")
+        amend_output = context.get("amend", {})
+        proposal_dicts = amend_output.get("proposals", [])
+        
+        if not proposal_dicts or not skill_path:
+            # No proposals to rank or no skill context
+            return amend_output
+        
+        try:
+            ranker = MemoryDrivenRanker(skill_path)
+            
+            # Group proposals by fixture for ranking
+            proposals_by_fixture: dict[str, list[tuple[int, dict]]] = {}
+            for idx, p_dict in enumerate(proposal_dicts):
+                fixture_name = p_dict.get("fixture_name", "")
+                if fixture_name not in proposals_by_fixture:
+                    proposals_by_fixture[fixture_name] = []
+                proposals_by_fixture[fixture_name].append((idx, p_dict))
+            
+            # Rank proposals for each fixture
+            ranked_indices: dict[int, float] = {}  # original_index -> rank_score
+            for fixture_name, fixture_proposals in proposals_by_fixture.items():
+                # Convert dicts to PatchProposal objects for ranking
+                proposal_objs = []
+                dict_to_obj = {}  # Track mapping from object back to dict
+                for _, p_dict in fixture_proposals:
+                    obj = PatchProposal(
+                        type=p_dict.get("type", ""),
+                        description=p_dict.get("description", ""),
+                        content=p_dict.get("content", {}),
+                        fixture_name=p_dict.get("fixture_name", ""),
+                        severity=p_dict.get("severity", "info"),
+                        confidence=p_dict.get("confidence", 0.0),
+                    )
+                    proposal_objs.append(obj)
+                    dict_to_obj[id(obj)] = p_dict
+                
+                # Rank the objects
+                ranked = ranker.rank_proposals(proposal_objs, fixture_name)
+                
+                # Map rank scores back to original indices
+                for ranked_obj, score in ranked:
+                    original_dict = dict_to_obj.get(id(ranked_obj))
+                    if original_dict:
+                        for orig_idx, p_dict in fixture_proposals:
+                            if p_dict is original_dict:
+                                ranked_indices[orig_idx] = score
+                                break
+            
+            # Reorder proposals by descending rank score
+            # Proposals without a score (shouldn't happen) go to the end
+            sorted_proposal_indices = sorted(
+                range(len(proposal_dicts)),
+                key=lambda i: ranked_indices.get(i, -1.0),
+                reverse=True
+            )
+            
+            reordered_proposals = [proposal_dicts[i] for i in sorted_proposal_indices]
+            
+            # Return updated context with reordered proposals
+            result = dict(amend_output)
+            result["proposals"] = reordered_proposals
+            result["ranking_applied"] = True
+            result["rank_scores"] = {i: ranked_indices.get(i, 0.0) for i in range(len(proposal_dicts))}
+            return result
+            
+        except Exception as e:
+            # Graceful degradation: if ranking fails, return original proposals
+            result = dict(amend_output)
+            result["ranking_applied"] = False
+            result["ranking_error"] = str(e)
+            return result
+    
+    return rank_proposals
 
 
 def create_patch_apply_stage(
@@ -305,8 +499,8 @@ def create_patch_apply_stage(
 ) -> Stage:
     def apply_patches(context: dict) -> dict:
         skill_path = context.get("skill_path")
-        amend_output = context.get("amend", {})
-        proposal_dicts = amend_output.get("proposals", [])
+        proposal_source = _proposal_source(context)
+        proposal_dicts = proposal_source.get("proposals", [])
 
         proposals = [
             PatchProposal(
@@ -380,8 +574,8 @@ def create_safe_patch_trial_stage(
             before_report = evaluator.evaluate_all(before_outputs)
             before_dict = before_report.to_dict()
 
-        amend_output = context.get("amend", {})
-        proposal_dicts = amend_output.get("proposals", [])
+        proposal_source = _proposal_source(context)
+        proposal_dicts = proposal_source.get("proposals", [])
         proposals = [
             PatchProposal(
                 type=p.get("type", ""),

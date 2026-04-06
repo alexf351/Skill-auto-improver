@@ -14,7 +14,32 @@ With built-in **rollback safety** and **version history**.
 
 ## What's Shipped
 
-### ✅ Checklist-Based Scoring Mode (2026-03-25, Latest)
+### ✅ Fixture Hotspot Summaries for Trace-Aware Loops (2026-04-05, Latest)
+
+**Files:** `src/skill_auto_improver/logger.py`, `src/skill_auto_improver/loop.py`, `src/skill_auto_improver/trial_workspace.py`, `tests/test_loop.py`, `tests/test_cli.py`
+
+Makes unattended improvement runs more targeted by surfacing which fixtures are repeatedly failing or regressing across recent traces:
+
+- Trace summaries now aggregate per-fixture `regressed`, `recovered`, and `stable_fail` counts from prior A/B comparisons
+- Observe-stage signals call out the hottest recently regressing fixture instead of only reporting coarse run totals
+- Inspect-stage priorities now bias the next amendment pass toward the most unstable fixture before broader edits
+- Trial-workspace dossiers now expose hotspot-aware warnings, open questions, and candidate-change suggestions for operators
+
+**Tests:** Added coverage for hotspot aggregation in observe/inspect flows and workspace trace summaries
+
+### ✅ Command-Probe CWD Containment Guards (2026-04-05)
+
+**Files:** `src/skill_auto_improver/cli.py`, `src/skill_auto_improver/orchestrator.py`, `tests/test_cli.py`, `tests/test_orchestrator.py`
+
+Closes a real unattended-evaluation safety gap where command-based fixtures could declare a working directory outside the target skill root:
+
+- Command probe execution now resolves `input_data.cwd` and rejects escapes like `../outside`
+- Orchestration preflight now catches unsafe command-probe `cwd` values before any batch trial/evaluation runs
+- Direct CLI/runtime evaluation paths enforce the same containment rule, so safety does not depend on orchestration being used
+
+**Tests:** Added CLI + orchestrator coverage for unsafe `cwd` rejection
+
+### ✅ Checklist-Based Scoring Mode (2026-03-25)
 
 **File:** `src/skill_auto_improver/checklist_evaluator.py`
 
@@ -58,6 +83,103 @@ Flexible yes/no question-based evaluation alongside fixture mode:
 
 **Tests:** 24 comprehensive unit tests (all passing)
 **Docs:** `CHECKLIST_MODE.md` with examples, API, best practices
+
+### ✅ Orchestrator CLI Batch Runner (2026-03-29, Latest)
+
+**Files:** `src/skill_auto_improver/cli.py`, `tests/test_cli.py`
+
+Adds a first-class way to run multi-skill orchestration batches without custom Python glue:
+
+- New CLI command:
+  ```bash
+  python3 -m skill_auto_improver.cli run-orchestration \
+    --brain-dir ./shared_brain \
+    --config ./orchestration.json \
+    --logs-dir ./runs
+  ```
+- `orchestration.json` is a simple JSON list of `SkillTrialConfig`-shaped objects
+- Returns structured run metrics plus per-skill outcomes, making it cron/operator friendly
+- Reuses the existing orchestrator persistence path, so orchestration summary logs still land in `--logs-dir`
+
+**Tests:** Added CLI coverage for successful batch execution and invalid config rejection
+
+### ✅ Amendment Stage Evaluation Seeding (2026-03-30, Latest)
+
+**Files:** `src/skill_auto_improver/loop.py`, `tests/test_loop.py`
+
+Closes a bootstrap gap in the observe/inspect/amend/evaluate loop when proposals need failing fixture context before a full pipeline has already run:
+
+- `create_amendment_proposal_stage(golden_evaluator=...)` now actually uses the provided evaluator when `context["evaluate"]` is absent
+- If `actual_outputs` are present, the amend stage self-computes a golden evaluation snapshot and generates proposals from that failure data
+- Amendment output now includes `evaluation_seed` when it had to self-seed evaluation, keeping this path explicit for operators and tests
+- If neither prior evaluation results nor `actual_outputs` exist, the stage still degrades safely to an empty proposal set
+
+**Tests:** Added focused loop coverage for seeded proposal generation and safe no-input fallback
+
+### ✅ Duplicate Fixture-Name Preflight (2026-04-01, Latest)
+
+**Files:** `src/skill_auto_improver/orchestrator.py`, `tests/test_orchestrator.py`, `tests/test_cli.py`
+
+Closes an orchestration-input ambiguity gap for unattended batches before any evaluation or apply stage runs:
+
+- Orchestration preflight now rejects duplicate fixture `name` entries inside the same fixtures file
+- This prevents ambiguous proposal targeting and muddy per-fixture outcome attribution during unattended trial runs
+- Batch output surfaces these cases under `invalid_fixtures_shape`, making operator debugging clearer
+
+**Tests:** Added orchestrator + CLI coverage for duplicate fixture-name rejection
+
+### ✅ Artifact Target-Path Safety Preflight (2026-04-01)
+
+**Files:** `src/skill_auto_improver/orchestrator.py`, `tests/test_orchestrator.py`, `tests/test_cli.py`
+
+Closes a patch-proposal safety gap for unattended orchestration batches before any write stage is reached:
+
+- Orchestration preflight now validates artifact proposals more deeply:
+  - `content` must be an object
+  - `content.target_path` must be a non-empty string
+  - resolved artifact targets must stay inside the target skill root
+- This catches `../outside.md`-style escape attempts as auditable preflight failures instead of relying on later apply-time rejection
+- Batch output now surfaces these cases under `invalid_proposals_shape`, making cron/operator debugging clearer
+
+**Tests:** Added orchestrator + CLI coverage for artifact target escape rejection
+
+### ✅ Golden Evaluation CLI + Trace Logging (2026-03-28)
+
+**Files:** `src/skill_auto_improver/cli.py`, `tests/test_cli.py`
+
+Adds a first-class way to run golden fixtures directly against a skill without going through a patch trial:
+
+- New CLI command:
+  ```bash
+  python3 -m skill_auto_improver.cli evaluate-golden \
+    --skill-path /path/to/target-skill \
+    --fixtures /path/to/fixtures.json \
+    --logs-dir ./runs
+  ```
+- Reuses existing file-content and command-probe fixture execution paths
+- Returns non-zero exit status when any golden fixture fails, making it CI/cron-friendly
+- Persists normalized evaluation traces via the shared trace writer, so golden runs now land in the same audit trail as checklist/hybrid/trial flows
+
+**Tests:** Added CLI coverage proving failing golden runs emit trace metadata with `mode: golden`
+
+### ✅ Fixture Suggestion CLI (2026-03-26)
+
+**Files:** `src/skill_auto_improver/shared_brain.py`, `src/skill_auto_improver/cli.py`
+
+Makes shared-brain fixture-library knowledge directly usable from the CLI when bootstrapping or expanding golden tests:
+
+- `SharedBrain.suggest_fixture_templates()` ranks fixture-library entries against a requested fixture name
+- `FixtureSuggestion` payload includes similarity score, shared traits, expected behavior, anti-patterns, reusable template, and successful skills
+- CLI command:
+  ```bash
+  python3 -m skill_auto_improver.cli suggest-fixtures \
+    --brain-dir ./shared_brain \
+    --fixture-name greeting_formal_check \
+    --limit 3
+  ```
+- Output is JSON, ready for operators or downstream automation to turn into new golden fixtures
+
+**Tests:** Added shared-brain + CLI coverage for ranked suggestions
 
 ### ✅ Proposer + SharedBrain Integration (2026-03-24)
 
@@ -618,6 +740,15 @@ cd skill-auto-improver
 PYTHONPATH=./src python3 -m unittest discover tests/ -v
 ```
 
+Run a direct golden evaluation:
+```bash
+cd skill-auto-improver
+PYTHONPATH=./src python3 -m skill_auto_improver.cli evaluate-golden \
+  --skill-path /path/to/target-skill \
+  --fixtures /path/to/fixtures.json \
+  --logs-dir ./runs
+```
+
 Run a concrete patch trial:
 ```bash
 cd skill-auto-improver
@@ -816,9 +947,10 @@ See [CODE_AUDIT_GUIDE.md](./CODE_AUDIT_GUIDE.md) for line-by-line security revie
 5. ✅ **Skill amendment applier**: Apply or preview accepted proposals with backup snapshots
 6. ✅ **Rollback + version history**: Safe reverts with diffs
 7. ✅ **Guarded end-to-end patch trial**: apply candidate change, re-evaluate, and auto-rollback on regression
-8. **CLI/example for real skill trial runs**: demonstrate proposal apply → evaluate → rollback decision
+8. ✅ **CLI/example for real skill trial runs**: demonstrate proposal apply → evaluate → rollback decision
 9. ✅ **Richer operator audit metadata**: include backup identifiers/diff summaries alongside patch-trial metadata
-10. **CLI/example for real skill trial runs**: demonstrate proposal apply → evaluate → rollback decision against a concrete skill folder
+10. ✅ **Trace-aware hotspot summaries**: carry repeated fixture instability into observe/inspect/workspace guidance
+11. **Patch proposal flow tightening**: connect hotspot-aware inspect output to narrower auto-generated proposal scopes
 
 ## Design Decisions
 
