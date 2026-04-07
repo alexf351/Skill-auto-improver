@@ -25,6 +25,31 @@ Expand to multi-skill orchestration with shared learning across skills.
 
 ## Progress Log
 
+### 2026-04-07 (Daily Autonomous Build Block): Inspect-Driven Hotspot Proposal Narrowing
+- Connected inspect-stage hotspot signals to amendment proposal generation instead of leaving inspect as advisory-only
+- `ProposalEngine.generate_proposals()` now accepts optional `inspect_context` parameter
+- Proposal generation now:
+  - extracts hotspot fixtures from inspect context and uses them for proposal ordering
+  - prioritizes hotspot fixtures ahead of other failures (sort key reordered)
+  - narrows scope for hotspot proposals toward safer `test_case`/`artifact` work before broader instruction edits
+  - annotates proposal scope metadata (`fixture_hotspot` vs `normal`) so downstream apply/review flows see fixture-local intent
+  - makes hotspot instruction/artifact/test-case descriptions explicitly warn against broad rewrites
+- Added hotspot fixture tracking to trace logging:
+  - `_collect_fixture_status_counts()` extracts per-fixture A/B comparison results from traces
+  - New `fixture_hotspots` section in trace summaries with top regressed/recovered/stable_fail fixtures
+  - Helps operators spot repeating problem fixtures in recent-run summaries
+- Extended orchestration config validation:
+  - Added `TrialPreflightIssue` schema for structured validation errors
+  - `SkillTrialConfig` now validates skill_name, min_confidence, accepted_severities, and new `accepted_types` field
+  - Config validation in `__post_init__()` ensures early failure on bad configs
+- Normalized patch trial metadata handling:
+  - `MultiSkillOrchestrator._normalized_patch_trial_metadata()` accepts both flat loop-level and nested stage-output structures
+  - Enables orchestration to consume traces from different pipeline versions
+- Refactored nightly orchestrator for clarity and standard logging
+- Added default improver factory for safe no-op tracing when custom pipelines not provided
+- All 262 tests pass; backward compatible with existing pipelines
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_proposer tests.test_loop tests.test_ranking_integration -v`
+
 ### 2026-03-14: Baseline Loop + Trace Logging
 - Implemented `SkillAutoImprover` with four pluggable stages: observe → inspect → amend → evaluate
 - Added `RunTrace` schema with structured step results and metadata
