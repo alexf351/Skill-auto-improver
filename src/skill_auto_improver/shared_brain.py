@@ -113,6 +113,24 @@ class SkillMastery:
     last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+@dataclass
+class FixtureSuggestion:
+    """Review-friendly fixture-library suggestion for a requested fixture."""
+    fixture_name: str
+    entry_id: str
+    pattern_name: str
+    similarity_score: float
+    shared_traits: list[str] = field(default_factory=list)
+    expected_behavior: str = ""
+    successful_skills: list[str] = field(default_factory=list)
+    anti_patterns: list[str] = field(default_factory=list)
+    adaptability_notes: str = ""
+    fixture_template: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class SharedBrain:
     """
     Multi-skill shared memory system.
@@ -283,6 +301,43 @@ class SharedBrain:
         """Get learned insights for a specific skill."""
         return self.skill_mastery.get(skill_name)
 
+    def suggest_fixture_templates(self, fixture_name: str, limit: int = 3) -> list[FixtureSuggestion]:
+        """Return the most relevant reusable fixture templates for a requested fixture."""
+        keywords = {part for part in re.split(r"[^a-z0-9]+", fixture_name.lower()) if part}
+        suggestions: list[FixtureSuggestion] = []
+
+        for entry in self.fixture_library.values():
+            entry_keywords = {part for part in re.split(r"[^a-z0-9]+", entry.fixture_pattern_name.lower()) if part}
+            shared_traits = sorted(keywords & entry_keywords)
+            if not shared_traits and entry.fixture_pattern_name.lower() not in fixture_name.lower() and fixture_name.lower() not in entry.fixture_pattern_name.lower():
+                continue
+
+            overlap_score = len(shared_traits) / max(len(keywords | entry_keywords), 1)
+            substring_bonus = 0.35 if (
+                entry.fixture_pattern_name.lower() in fixture_name.lower()
+                or fixture_name.lower() in entry.fixture_pattern_name.lower()
+            ) else 0.0
+            skill_bonus = min(len(entry.successful_skills), 3) * 0.05
+            similarity_score = round(min(0.99, overlap_score + substring_bonus + skill_bonus), 3)
+
+            suggestions.append(
+                FixtureSuggestion(
+                    fixture_name=fixture_name,
+                    entry_id=entry.id,
+                    pattern_name=entry.fixture_pattern_name,
+                    similarity_score=similarity_score,
+                    shared_traits=shared_traits,
+                    expected_behavior=entry.expected_behavior,
+                    successful_skills=entry.successful_skills,
+                    anti_patterns=entry.anti_patterns,
+                    adaptability_notes=entry.adaptability_notes,
+                    fixture_template=entry.fixture_template,
+                )
+            )
+
+        suggestions.sort(key=lambda item: (-item.similarity_score, item.pattern_name))
+        return suggestions[:limit]
+
     def get_or_create_skill_mastery(self, skill_name: str, skill_type: str = "") -> SkillMastery:
         """Get existing or create new skill mastery record."""
         if skill_name not in self.skill_mastery:
@@ -430,3 +485,40 @@ class SharedBrain:
             "total_promotions_across_system": len(self.promotion_wisdom),
             "total_regression_incidents": sum(p.occurrence_count for p in self.regression_patterns.values()),
         }
+
+    def summarize_dashboard(self, skill_name: Optional[str] = None, *, limit: int = 5) -> dict[str, Any]:
+        """Return an operator-facing dashboard snapshot of shared brain state."""
+        top_promotions = sorted(
+            self.promotion_wisdom.values(),
+            key=lambda item: (-item.promotion_count, -item.confidence, item.fixture_name),
+        )[:limit]
+        top_regressions = sorted(
+            self.regression_patterns.values(),
+            key=lambda item: (-item.occurrence_count, item.pattern_name),
+        )[:limit]
+        most_active_skills = sorted(
+            self.skill_mastery.values(),
+            key=lambda item: (-item.total_trials, -item.successful_promotions, item.skill_name),
+        )[:limit]
+
+        dashboard = {
+            "brain_dir": str(self.brain_dir),
+            "counts": {
+                "directives": len(self.core_directives),
+                "promotion_wisdom": len(self.promotion_wisdom),
+                "regression_patterns": len(self.regression_patterns),
+                "fixture_library": len(self.fixture_library),
+                "skill_mastery": len(self.skill_mastery),
+            },
+            "top_promotions": [asdict(item) for item in top_promotions],
+            "top_regressions": [asdict(item) for item in top_regressions],
+            "most_active_skills": [asdict(item) for item in most_active_skills],
+        }
+
+        if skill_name:
+            dashboard["skill"] = self.summarize_for_skill(skill_name)
+            dashboard["fixture_suggestions"] = [
+                item.to_dict() for item in self.suggest_fixture_templates(skill_name, limit=limit)
+            ]
+
+        return dashboard

@@ -24,6 +24,7 @@ class AppliedChange:
     target_path: str
     backup_path: str | None
     status: str
+    fixture_name: str | None = None
     detail: str = ""
     backup_id: str | None = None
     diff_summary: dict[str, Any] | None = None
@@ -348,6 +349,7 @@ class SkillPatchApplier:
             target_path=str(self.skill_md_path),
             backup_path=str(backup_path) if backup_path else None,
             status="applied",
+            fixture_name=proposal.fixture_name,
             detail=f"instruction note {action}",
             backup_id=self._backup_id(backup_path),
             diff_summary=diff_summary,
@@ -408,6 +410,7 @@ class SkillPatchApplier:
             target_path=str(resolved),
             backup_path=str(backup_path) if backup_path else None,
             status="applied",
+            fixture_name=proposal.fixture_name,
             detail=f"artifact note {action}",
             backup_id=self._backup_id(backup_path),
             diff_summary=diff_summary,
@@ -451,6 +454,7 @@ class SkillPatchApplier:
             target_path=str(self.fixtures_path),
             backup_path=str(backup_path) if backup_path else None,
             status="applied",
+            fixture_name=proposal.fixture_name,
             detail="regression fixture appended",
             backup_id=self._backup_id(backup_path),
             diff_summary=diff_summary,

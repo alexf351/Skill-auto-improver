@@ -1,0 +1,38 @@
+{
+  "cd_001_min_confidence": {
+    "id": "cd_001_min_confidence",
+    "title": "Minimum Confidence Floor",
+    "description": "Never auto-apply proposals below 0.80 confidence across any skill.",
+    "applies_to": [
+      "*"
+    ],
+    "auto_apply": true,
+    "created_at": "2026-03-25T09:01:45.191481+00:00",
+    "last_updated": "2026-03-25T09:01:45.191513+00:00",
+    "example": "Reject a 0.75-confidence instruction proposal; require manual review."
+  },
+  "cd_002_test_case_first": {
+    "id": "cd_002_test_case_first",
+    "title": "Test Case Before Instruction",
+    "description": "For any historically broken fixture, require a test_case proposal to accompany instruction proposals.",
+    "applies_to": [
+      "*"
+    ],
+    "auto_apply": true,
+    "created_at": "2026-03-25T09:01:45.191518+00:00",
+    "last_updated": "2026-03-25T09:01:45.191520+00:00",
+    "example": "Block instruction-only patches to a risky fixture; wait for regression test."
+  },
+  "cd_003_no_churn": {
+    "id": "cd_003_no_churn",
+    "title": "Change Budget Enforcement",
+    "description": "Reject patches that change >10 targets or add >100 lines without explicit approval.",
+    "applies_to": [
+      "*"
+    ],
+    "auto_apply": true,
+    "created_at": "2026-03-25T09:01:45.191522+00:00",
+    "last_updated": "2026-03-25T09:01:45.191524+00:00",
+    "example": "Rollback a patch that touched 15 files; review necessity before retry."
+  }
+}

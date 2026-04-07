@@ -1,0 +1,87 @@
+{
+  "morning-brief": {
+    "skill_name": "morning-brief",
+    "skill_type": "morning-brief",
+    "id": "d3ef67e9-1f8e-4283-b769-5288d4df57cb",
+    "total_trials": 7,
+    "successful_promotions": 2,
+    "regression_incidents": 0,
+    "average_proposal_confidence": 0.85,
+    "most_effective_proposal_types": [
+      "test_case",
+      "instruction"
+    ],
+    "fixture_mastery": {},
+    "common_issues": [],
+    "created_at": "2026-03-26T09:03:17.974843+00:00",
+    "last_updated": "2026-04-07T09:01:50.757598+00:00"
+  },
+  "weather-brief": {
+    "skill_name": "weather-brief",
+    "skill_type": "weather-brief",
+    "id": "23b43a64-d096-40cb-951f-7b1099f47073",
+    "total_trials": 7,
+    "successful_promotions": 2,
+    "regression_incidents": 0,
+    "average_proposal_confidence": 0.85,
+    "most_effective_proposal_types": [
+      "test_case",
+      "instruction"
+    ],
+    "fixture_mastery": {},
+    "common_issues": [],
+    "created_at": "2026-03-26T09:03:17.978602+00:00",
+    "last_updated": "2026-04-07T09:01:50.758781+00:00"
+  },
+  "kiro-dev-assistant": {
+    "skill_name": "kiro-dev-assistant",
+    "skill_type": "kiro-dev-assistant",
+    "id": "0d07fbb5-9d9b-423c-b3ae-447f6f76637f",
+    "total_trials": 7,
+    "successful_promotions": 2,
+    "regression_incidents": 0,
+    "average_proposal_confidence": 0.85,
+    "most_effective_proposal_types": [
+      "test_case",
+      "instruction"
+    ],
+    "fixture_mastery": {},
+    "common_issues": [],
+    "created_at": "2026-03-26T09:03:17.981159+00:00",
+    "last_updated": "2026-04-07T09:01:50.760118+00:00"
+  },
+  "kiro-content-calendar": {
+    "skill_name": "kiro-content-calendar",
+    "skill_type": "kiro-content-calendar",
+    "id": "4d2604c0-3308-4fc4-8be4-1e2ef45e7748",
+    "total_trials": 7,
+    "successful_promotions": 2,
+    "regression_incidents": 0,
+    "average_proposal_confidence": 0.85,
+    "most_effective_proposal_types": [
+      "test_case",
+      "instruction"
+    ],
+    "fixture_mastery": {},
+    "common_issues": [],
+    "created_at": "2026-03-26T09:03:17.982709+00:00",
+    "last_updated": "2026-04-07T09:01:50.761563+00:00"
+  },
+  "kiro-ugc-brief": {
+    "skill_name": "kiro-ugc-brief",
+    "skill_type": "kiro-ugc-brief",
+    "id": "03861644-896f-48c4-90e3-5387db2a540e",
+    "total_trials": 7,
+    "successful_promotions": 2,
+    "regression_incidents": 0,
+    "average_proposal_confidence": 0.85,
+    "most_effective_proposal_types": [
+      "test_case",
+      "instruction"
+    ],
+    "fixture_mastery": {},
+    "common_issues": [],
+    "created_at": "2026-03-26T09:03:17.990415+00:00",
+    "last_updated": "2026-04-07T09:01:50.762440+00:00"
+  }
+}

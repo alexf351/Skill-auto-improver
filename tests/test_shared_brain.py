@@ -14,6 +14,7 @@ from skill_auto_improver.shared_brain import (
     RegressionPattern,
     FixtureLibraryEntry,
     SkillMastery,
+    FixtureSuggestion,
 )
 
 
@@ -208,6 +209,36 @@ class SharedBrainTests(unittest.TestCase):
         # Should find greeting_formal as most similar
         self.assertGreater(len(similar), 0)
 
+    def test_suggest_fixture_templates_returns_ranked_matches(self):
+        """Should return review-friendly ranked fixture suggestions."""
+        self.brain.add_fixture_to_library(
+            fixture_pattern_name="greeting_formal",
+            fixture_template={"name": "greeting_formal", "expected_output": {"greeting": "Hello"}},
+            expected_behavior="Formal greeting",
+            successful_skills=["weather", "kiro"],
+        )
+        self.brain.add_fixture_to_library(
+            fixture_pattern_name="greeting_casual",
+            fixture_template={"name": "greeting_casual"},
+            expected_behavior="Casual greeting",
+            successful_skills=["chat"],
+        )
+        self.brain.add_fixture_to_library(
+            fixture_pattern_name="farewell_formal",
+            fixture_template={"name": "farewell_formal"},
+            expected_behavior="Formal farewell",
+            successful_skills=["weather"],
+        )
+
+        suggestions = self.brain.suggest_fixture_templates("greeting_formal_check", limit=2)
+
+        self.assertEqual(len(suggestions), 2)
+        self.assertIsInstance(suggestions[0], FixtureSuggestion)
+        self.assertEqual(suggestions[0].pattern_name, "greeting_formal")
+        self.assertGreaterEqual(suggestions[0].similarity_score, suggestions[1].similarity_score)
+        self.assertIn("greeting", suggestions[0].shared_traits)
+        self.assertEqual(suggestions[0].fixture_template["name"], "greeting_formal")
+
     def test_get_or_create_skill_mastery(self):
         """Should get existing or create new skill mastery."""
         mastery1 = self.brain.get_or_create_skill_mastery("kiro", skill_type="mobile_app")
@@ -253,6 +284,56 @@ class SharedBrainTests(unittest.TestCase):
         self.assertEqual(summary["skill_name"], "weather")
         self.assertIsNotNone(summary["mastery"])
         self.assertGreater(len(summary["applicable_directives"]), 0)
+
+    def test_summarize_dashboard_returns_ranked_sections(self):
+        """Should expose ranked operator-facing brain dashboard sections."""
+        self.brain.record_promotion(
+            fixture_name="formal_greeting",
+            skill_name="weather",
+            proposal_types=["test_case", "instruction"],
+            reason="Recovered safely",
+            confidence=0.91,
+        )
+        self.brain.record_promotion(
+            fixture_name="formal_greeting",
+            skill_name="kiro",
+            proposal_types=["test_case", "instruction"],
+            reason="Recovered safely again",
+            confidence=0.93,
+        )
+        self.brain.record_regression(
+            pattern_name="instruction_without_test",
+            skill_name="weather",
+            trigger="instruction only patch",
+            fix_strategy="pair with test case",
+            severity="critical",
+        )
+        self.brain.record_regression(
+            pattern_name="instruction_without_test",
+            skill_name="kiro",
+            trigger="instruction only patch",
+            fix_strategy="pair with test case",
+            severity="critical",
+        )
+        self.brain.update_skill_mastery("weather", total_trials=7, successful_promotions=4)
+        self.brain.add_fixture_to_library(
+            fixture_pattern_name="weather_greeting",
+            fixture_template={"name": "weather_greeting"},
+            expected_behavior="Friendly forecast greeting",
+            successful_skills=["weather"],
+        )
+
+        dashboard = self.brain.summarize_dashboard("weather", limit=1)
+
+        self.assertEqual(dashboard["counts"]["promotion_wisdom"], 1)
+        self.assertEqual(dashboard["counts"]["regression_patterns"], 1)
+        self.assertEqual(len(dashboard["top_promotions"]), 1)
+        self.assertEqual(dashboard["top_promotions"][0]["promotion_count"], 2)
+        self.assertEqual(len(dashboard["top_regressions"]), 1)
+        self.assertEqual(dashboard["top_regressions"][0]["occurrence_count"], 2)
+        self.assertEqual(dashboard["most_active_skills"][0]["skill_name"], "weather")
+        self.assertEqual(dashboard["skill"]["skill_name"], "weather")
+        self.assertEqual(dashboard["fixture_suggestions"][0]["pattern_name"], "weather_greeting")
 
     def test_brain_persistence_directives(self):
         """Directives should persist to disk."""

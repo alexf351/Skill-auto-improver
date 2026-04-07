@@ -15,6 +15,7 @@ Output: run-history.jsonl, morning-summary.json
 import json
 import os
 import sys
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -22,9 +23,13 @@ from typing import Optional, Dict, Any, List
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from orchestrator import MultiSkillOrchestrator, SkillTrialConfig, OrchestrationRun
-from shared_brain import SharedBrain
-from logger import SkillAutoImproverLogger
+from .orchestrator import MultiSkillOrchestrator, SkillTrialConfig, OrchestrationRun
+from .shared_brain import SharedBrain
+from .logger import TraceLogger
+
+# Simple logger
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger("nightly-orchestrator")
 
 
 class NightlyOrchestratorRunner:
@@ -54,12 +59,9 @@ class NightlyOrchestratorRunner:
         self.brain_root = self.skill_auto_improver_root / "shared_brain"
         self.morning_summary_path = self.skill_auto_improver_root / "runs" / "morning-summary.json"
 
-        # Logger
-        self.logger = SkillAutoImproverLogger(name="nightly-orchestrator")
-
         # Initialize orchestrator with shared brain
+        self.orchestrator = MultiSkillOrchestrator(str(self.brain_root))
         self.brain = SharedBrain(str(self.brain_root))
-        self.orchestrator = MultiSkillOrchestrator(self.brain)
 
         # Target skills to monitor
         self.target_skills = [
@@ -82,9 +84,9 @@ class NightlyOrchestratorRunner:
             skill_path = self.skills_root / skill_name
             if skill_path.exists() and (skill_path / "SKILL.md").exists():
                 discovered[skill_name] = skill_path
-                self.logger.info(f"Discovered skill: {skill_name} at {skill_path}")
+                logger.info(f"Discovered skill: {skill_name} at {skill_path}")
             else:
-                self.logger.warning(f"Skill not found: {skill_name} at {skill_path}")
+                logger.warning(f"Skill not found: {skill_name} at {skill_path}")
         return discovered
 
     def create_trial_configs(self, discovered_skills: Dict[str, Path]) -> List[SkillTrialConfig]:
@@ -102,13 +104,13 @@ class NightlyOrchestratorRunner:
             config = SkillTrialConfig(
                 skill_name=skill_name,
                 skill_path=str(skill_path),
+                skill_type=skill_name,
                 min_confidence=0.70,
-                max_proposals=10,
-                run_evaluations=True,
-                use_shared_brain=True,
+                accepted_severities=["warning", "critical"],
+                enabled=True,
             )
             configs.append(config)
-            self.logger.info(f"Created trial config for {skill_name}")
+            logger.info(f"Created trial config for {skill_name}")
         return configs
 
     def run_orchestration_trial(self, configs: List[SkillTrialConfig]) -> Optional[OrchestrationRun]:
@@ -122,21 +124,21 @@ class NightlyOrchestratorRunner:
             OrchestrationRun result or None if error
         """
         try:
-            self.logger.info(
+            logger.info(
                 f"Starting nightly orchestration trial for {len(configs)} skills at {datetime.utcnow().isoformat()}"
             )
 
             # Execute orchestration
             run_result = self.orchestrator.run_orchestration(configs)
 
-            self.logger.info(f"Orchestration trial completed: {run_result.run_id}")
-            self.logger.info(f"  - Skills attempted: {run_result.skills_attempted}")
-            self.logger.info(f"  - Skills successful: {run_result.skills_successful}")
-            self.logger.info(f"  - Total trials: {len(run_result.trial_results)}")
+            logger.info(f"Orchestration trial completed: {run_result.run_id}")
+            logger.info(f"  - Total skills: {run_result.total_skills}")
+            logger.info(f"  - Successful trials: {run_result.successful_trials}")
+            logger.info(f"  - Rolled back trials: {run_result.rolled_back_trials}")
 
             return run_result
         except Exception as e:
-            self.logger.error(f"Orchestration trial failed: {e}", exc_info=True)
+            logger.error(f"Orchestration trial failed: {e}", exc_info=True)
             return None
 
     def log_run_to_history(self, run_result: OrchestrationRun) -> None:
@@ -148,31 +150,16 @@ class NightlyOrchestratorRunner:
         """
         try:
             # Convert run result to dict
-            run_dict = {
-                "timestamp": datetime.utcnow().isoformat(),
-                "run_id": run_result.run_id,
-                "skills_attempted": run_result.skills_attempted,
-                "skills_successful": run_result.skills_successful,
-                "total_trials": len(run_result.trial_results),
-                "trial_results": [
-                    {
-                        "skill_name": tr.skill_name,
-                        "status": tr.status,
-                        "proposals_count": len(tr.proposals) if tr.proposals else 0,
-                        "evaluation_score": tr.evaluation_score,
-                        "metrics": tr.metrics,
-                    }
-                    for tr in run_result.trial_results
-                ],
-            }
+            run_dict = run_result.to_dict()
+            run_dict["timestamp"] = datetime.utcnow().isoformat()
 
             # Append to jsonl
             with open(self.run_history_path, "a") as f:
                 f.write(json.dumps(run_dict) + "\n")
 
-            self.logger.info(f"Logged run to {self.run_history_path}")
+            logger.info(f"Logged run to {self.run_history_path}")
         except Exception as e:
-            self.logger.error(f"Failed to log run to history: {e}", exc_info=True)
+            logger.error(f"Failed to log run to history: {e}", exc_info=True)
 
     def prepare_morning_summary(self, run_result: OrchestrationRun) -> Dict[str, Any]:
         """
@@ -185,40 +172,49 @@ class NightlyOrchestratorRunner:
             Dict with morning summary data
         """
         try:
-            # Get brain summary
-            brain_summary = self.brain.summarize()
+            raw_brain_summary = self.orchestrator.get_brain_summary()
+            brain_summary = {
+                "promotion_wisdom_count": raw_brain_summary.get("promotion_wisdom_entries", 0),
+                "regression_patterns_count": raw_brain_summary.get("regression_patterns", 0),
+                "fixture_library_size": raw_brain_summary.get("fixture_library_entries", 0),
+                "skill_mastery_entries": raw_brain_summary.get("skills_tracked", 0),
+                "total_successful_trials_recorded": raw_brain_summary.get("total_successful_trials_recorded", 0),
+                "total_regressions_prevented": raw_brain_summary.get("total_regressions_prevented", 0),
+            }
 
-            # Build summary structure
+            # Build summary structure based on run results
+            skill_trial_details = []
+            for skill_name, trial in run_result.skill_trials.items():
+                if trial:
+                    proposals = []
+                    for step in trial.steps:
+                        if step.name in {"rank", "amend"}:
+                            proposals = step.output.get("proposals", []) or proposals
+                    skill_trial_details.append({
+                        "skill": skill_name,
+                        "status": getattr(trial, "status", "unknown"),
+                        "proposals": len(proposals),
+                    })
+            
             morning_summary = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "period": "nightly",
                 "run_id": run_result.run_id,
                 "improvements": {
-                    "skills_improved": run_result.skills_successful,
-                    "total_trials": len(run_result.trial_results),
-                    "trial_details": [
-                        {
-                            "skill": tr.skill_name,
-                            "proposals": len(tr.proposals) if tr.proposals else 0,
-                            "evaluation_score": tr.evaluation_score,
-                        }
-                        for tr in run_result.trial_results
-                        if tr.status == "success"
-                    ],
+                    "successful_trials": run_result.successful_trials,
+                    "total_skills": run_result.total_skills,
+                    "trial_details": skill_trial_details,
                 },
                 "blocks": {
-                    "failed_skills": [
-                        tr.skill_name for tr in run_result.trial_results if tr.status != "success"
-                    ],
-                    "error_messages": [
-                        tr.error_message for tr in run_result.trial_results if tr.error_message
-                    ],
+                    "rolled_back_trials": run_result.rolled_back_trials,
+                    "skill_outcomes": run_result.skill_outcomes,
                 },
                 "learnings": {
-                    "promotion_wisdom_count": len(brain_summary.get("promotion_wisdom", [])),
-                    "regression_patterns_count": len(brain_summary.get("regression_patterns", [])),
-                    "fixture_library_size": len(brain_summary.get("fixture_library", [])),
-                    "skill_mastery_entries": len(brain_summary.get("skill_mastery", {})),
+                    "promotions_recorded": len(run_result.promotions_recorded),
+                    "regressions_recorded": len(run_result.regressions_recorded),
+                    "fixtures_added": len(run_result.fixtures_added_to_library),
+                    "promotions_accepted": run_result.promotions_accepted,
+                    "regressions_prevented": run_result.regressions_prevented,
                 },
                 "brain_state": brain_summary,
             }
@@ -227,10 +223,10 @@ class NightlyOrchestratorRunner:
             with open(self.morning_summary_path, "w") as f:
                 json.dump(morning_summary, f, indent=2)
 
-            self.logger.info(f"Morning summary prepared and saved to {self.morning_summary_path}")
+            logger.info(f"Morning summary prepared and saved to {self.morning_summary_path}")
             return morning_summary
         except Exception as e:
-            self.logger.error(f"Failed to prepare morning summary: {e}", exc_info=True)
+            logger.error(f"Failed to prepare morning summary: {e}", exc_info=True)
             return {}
 
     def run(self) -> bool:
@@ -240,15 +236,15 @@ class NightlyOrchestratorRunner:
         Returns:
             True if successful, False otherwise
         """
-        self.logger.info("=" * 80)
-        self.logger.info("NIGHTLY ORCHESTRATOR STARTING")
-        self.logger.info("=" * 80)
+        logger.info("=" * 80)
+        logger.info("NIGHTLY ORCHESTRATOR STARTING")
+        logger.info("=" * 80)
 
         try:
             # 1. Discover installed skills
             discovered = self.discover_installed_skills()
             if not discovered:
-                self.logger.warning("No target skills found; exiting")
+                logger.warning("No target skills found; exiting")
                 return False
 
             # 2. Create trial configs
@@ -257,7 +253,7 @@ class NightlyOrchestratorRunner:
             # 3. Run orchestration
             run_result = self.run_orchestration_trial(configs)
             if not run_result:
-                self.logger.error("Orchestration trial failed; exiting")
+                logger.error("Orchestration trial failed; exiting")
                 return False
 
             # 4. Log to history
@@ -267,15 +263,15 @@ class NightlyOrchestratorRunner:
             morning_summary = self.prepare_morning_summary(run_result)
 
             # 6. Final log
-            self.logger.info("=" * 80)
-            self.logger.info("NIGHTLY ORCHESTRATOR COMPLETE")
-            self.logger.info(f"Morning summary available at: {self.morning_summary_path}")
-            self.logger.info("=" * 80)
+            logger.info("=" * 80)
+            logger.info("NIGHTLY ORCHESTRATOR COMPLETE")
+            logger.info(f"Morning summary available at: {self.morning_summary_path}")
+            logger.info("=" * 80)
 
             return True
 
         except Exception as e:
-            self.logger.error(f"Nightly orchestrator failed: {e}", exc_info=True)
+            logger.error(f"Nightly orchestrator failed: {e}", exc_info=True)
             return False
 
 

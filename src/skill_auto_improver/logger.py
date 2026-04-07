@@ -7,6 +7,37 @@ from typing import Any
 from .models import RunTrace
 
 
+def _collect_fixture_status_counts(trace: dict[str, Any]) -> dict[str, dict[str, int]]:
+    counts = {
+        "regressed": {},
+        "recovered": {},
+        "stable_fail": {},
+    }
+
+    for step in trace.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        output = step.get("output") or {}
+        comparisons = ((output.get("ab") or {}).get("comparisons") if isinstance(output, dict) else None) or output.get("comparisons") or []
+        for comparison in comparisons:
+            if not isinstance(comparison, dict):
+                continue
+            fixture_name = str(comparison.get("fixture_name", "")).strip()
+            status = str(comparison.get("status", "")).strip()
+            if fixture_name and status in counts:
+                bucket = counts[status]
+                bucket[fixture_name] = bucket.get(fixture_name, 0) + 1
+
+    return counts
+
+
+def _top_fixture_counts(counts: dict[str, int], *, limit: int = 3) -> list[dict[str, Any]]:
+    return [
+        {"fixture_name": fixture_name, "count": count}
+        for fixture_name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    ]
+
+
 class TraceLogger:
     def __init__(self, root_dir: Path | str):
         self.root_dir = Path(root_dir)
@@ -48,12 +79,23 @@ def summarize_traces(
     total_regressions = 0
     total_recoveries = 0
     total_applied = 0
+    fixture_status_totals = {
+        "regressed": {},
+        "recovered": {},
+        "stable_fail": {},
+    }
 
     for trace in filtered:
         status = trace.get("status", "unknown")
         status_counts[status] = status_counts.get(status, 0) + 1
 
         patch_trial = (trace.get("metadata") or {}).get("patch_trial") or {}
+        fixture_counts = _collect_fixture_status_counts(trace)
+        for status, counts in fixture_counts.items():
+            aggregate = fixture_status_totals[status]
+            for fixture_name, count in counts.items():
+                aggregate[fixture_name] = aggregate.get(fixture_name, 0) + count
+
         if patch_trial:
             total_regressions += int(patch_trial.get("regressed_count", 0) or 0)
             total_recoveries += int(patch_trial.get("recovered_count", 0) or 0)
@@ -87,4 +129,9 @@ def summarize_traces(
         "total_applied": total_applied,
         "latest_failures": latest_failures[:3],
         "latest_successes": latest_successes[:3],
+        "fixture_hotspots": {
+            "regressed": _top_fixture_counts(fixture_status_totals["regressed"]),
+            "recovered": _top_fixture_counts(fixture_status_totals["recovered"]),
+            "stable_fail": _top_fixture_counts(fixture_status_totals["stable_fail"]),
+        },
     }

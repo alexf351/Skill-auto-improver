@@ -1,0 +1,200 @@
+{
+  "created_at": "2026-04-07T09:01:50+00:00",
+  "finished_at": "2026-04-07T09:01:50+00:00",
+  "metadata": {
+    "evaluation": {
+      "failed": 0,
+      "mode": "golden",
+      "pass_rate": 1.0,
+      "passed": 1,
+      "total": 1
+    },
+    "orchestration": {
+      "brain": {
+        "applicable_directives": [
+          {
+            "applies_to": [
+              "*"
+            ],
+            "auto_apply": true,
+            "created_at": "2026-03-25T09:01:45.191481+00:00",
+            "description": "Never auto-apply proposals below 0.80 confidence across any skill.",
+            "example": "Reject a 0.75-confidence instruction proposal; require manual review.",
+            "id": "cd_001_min_confidence",
+            "last_updated": "2026-03-25T09:01:45.191513+00:00",
+            "title": "Minimum Confidence Floor"
+          },
+          {
+            "applies_to": [
+              "*"
+            ],
+            "auto_apply": true,
+            "created_at": "2026-03-25T09:01:45.191518+00:00",
+            "description": "For any historically broken fixture, require a test_case proposal to accompany instruction proposals.",
+            "example": "Block instruction-only patches to a risky fixture; wait for regression test.",
+            "id": "cd_002_test_case_first",
+            "last_updated": "2026-03-25T09:01:45.191520+00:00",
+            "title": "Test Case Before Instruction"
+          },
+          {
+            "applies_to": [
+              "*"
+            ],
+            "auto_apply": true,
+            "created_at": "2026-03-25T09:01:45.191522+00:00",
+            "description": "Reject patches that change >10 targets or add >100 lines without explicit approval.",
+            "example": "Rollback a patch that touched 15 files; review necessity before retry.",
+            "id": "cd_003_no_churn",
+            "last_updated": "2026-03-25T09:01:45.191524+00:00",
+            "title": "Change Budget Enforcement"
+          }
+        ],
+        "regression_patterns_to_watch": [],
+        "similar_fixtures_in_library": [],
+        "skill_mastery": {
+          "average_proposal_confidence": 0.85,
+          "common_issues": [],
+          "created_at": "2026-03-26T09:03:17.981159+00:00",
+          "fixture_mastery": {},
+          "id": "0d07fbb5-9d9b-423c-b3ae-447f6f76637f",
+          "last_updated": "2026-03-31T09:01:21.751124+00:00",
+          "most_effective_proposal_types": [
+            "test_case",
+            "instruction"
+          ],
+          "regression_incidents": 0,
+          "skill_name": "kiro-dev-assistant",
+          "skill_type": "kiro-dev-assistant",
+          "successful_promotions": 2,
+          "total_trials": 6
+        }
+      },
+      "config": {
+        "accepted_severities": [
+          "warning",
+          "critical"
+        ],
+        "accepted_types": [
+          "instruction",
+          "test_case"
+        ],
+        "enabled": true,
+        "fixtures_path": null,
+        "min_confidence": 0.7,
+        "proposals_path": null,
+        "skill_name": "kiro-dev-assistant",
+        "skill_type": "kiro-dev-assistant"
+      },
+      "fixture_names": [],
+      "fixture_suggestions": {},
+      "preflight": {
+        "issue_count": 0,
+        "issues": [],
+        "ok": true
+      }
+    },
+    "patch_trial": {
+      "ab": {
+        "is_safe": true,
+        "pass_rate_delta": 0.0,
+        "recovered_count": 0,
+        "regressed_count": 0
+      },
+      "acceptance_reason": "audit only - no proposals applied",
+      "accepted": false,
+      "apply": {
+        "applied": [],
+        "applied_count": 0,
+        "skipped": [],
+        "skipped_count": 0
+      },
+      "rolled_back": false
+    }
+  },
+  "run_id": "7bab347e-37fd-4784-bd64-5d9092725bec",
+  "skill_path": "/home/clawd/.openclaw/workspace/skills/kiro-dev-assistant",
+  "status": "ok",
+  "steps": [
+    {
+      "finished_at": "2026-04-07T09:01:50+00:00",
+      "name": "observe",
+      "output": {
+        "char_count": 14985,
+        "has_frontmatter": true,
+        "line_count": 341,
+        "skill_file": "/home/clawd/.openclaw/workspace/skills/kiro-dev-assistant/SKILL.md"
+      },
+      "started_at": "2026-04-07T09:01:50+00:00"
+    },
+    {
+      "finished_at": "2026-04-07T09:01:50+00:00",
+      "name": "amend",
+      "output": {
+        "findings": [],
+        "proposals": [],
+        "reason": "default nightly audit mode",
+        "status": "no_changes_applied"
+      },
+      "started_at": "2026-04-07T09:01:50+00:00"
+    },
+    {
+      "finished_at": "2026-04-07T09:01:50+00:00",
+      "name": "inspect",
+      "output": {
+        "findings": [],
+        "status": "healthy"
+      },
+      "started_at": "2026-04-07T09:01:50+00:00"
+    },
+    {
+      "finished_at": "2026-04-07T09:01:50+00:00",
+      "name": "evaluate",
+      "output": {
+        "failed": 0,
+        "pass_rate": 1.0,
+        "passed": 1,
+        "results": [
+          {
+            "actual": {
+              "status": "healthy"
+            },
+            "delta": {
+              "findings": []
+            },
+            "expected": {
+              "status": "healthy"
+            },
+            "fixture_name": "skill_audit",
+            "passed": true,
+            "reason": "default nightly audit"
+          }
+        ],
+        "total": 1
+      },
+      "started_at": "2026-04-07T09:01:50+00:00"
+    },
+    {
+      "finished_at": "2026-04-07T09:01:50+00:00",
+      "name": "patch_trial",
+      "output": {
+        "ab": {
+          "is_safe": true,
+          "pass_rate_delta": 0.0,
+          "recovered_count": 0,
+          "regressed_count": 0
+        },
+        "acceptance_reason": "audit only - no proposals applied",
+        "accepted": false,
+        "apply": {
+          "applied": [],
+          "applied_count": 0,
+          "skipped": [],
+          "skipped_count": 0
+        },
+        "rolled_back": false
+      },
+      "started_at": "2026-04-07T09:01:50+00:00"
+    }
+  ],
+  "trace_version": 1
+}

@@ -207,6 +207,36 @@ class ProposalEngineTests(unittest.TestCase):
             self.assertEqual(artifact.content['format'], 'markdown_checklist')
             self.assertIn('- [ ] Protect fixture `greeting_test`', artifact.content['body'])
 
+    def test_inspect_hotspot_prioritizes_fixture_and_marks_scope(self):
+        failed_hotspot = self._failed('greeting_test')
+        failed_other = self._failed('other_test')
+
+        report = self.engine.generate_proposals(
+            [failed_other, failed_hotspot],
+            inspect_context={
+                'priorities': ["focus the next amendment on hotspot fixture 'greeting_test' before broad edits"],
+                'fixture_hotspots': {
+                    'regressed': [{'fixture_name': 'greeting_test', 'count': 2}],
+                    'stable_fail': [],
+                },
+            },
+        )
+
+        self.assertEqual(report.proposals[0].fixture_name, 'greeting_test')
+        self.assertEqual(report.proposals[0].type, 'test_case')
+        hotspot_instruction = next(
+            proposal for proposal in report.proposals
+            if proposal.fixture_name == 'greeting_test' and proposal.type == 'instruction'
+        )
+        other_instruction = next(
+            proposal for proposal in report.proposals
+            if proposal.fixture_name == 'other_test' and proposal.type == 'instruction'
+        )
+        self.assertEqual(hotspot_instruction.content['scope']['mode'], 'fixture_hotspot')
+        self.assertTrue(hotspot_instruction.content['scope']['fixture_local_only'])
+        self.assertEqual(other_instruction.content['scope']['mode'], 'normal')
+        self.assertIn('fixture-local', hotspot_instruction.description)
+
 
 class ProposalIntegrationTests(unittest.TestCase):
     def test_evaluator_failures_to_proposals(self):

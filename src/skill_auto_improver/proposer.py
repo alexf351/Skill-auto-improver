@@ -104,6 +104,7 @@ class ProposalEngine:
         failed_results: list[TestResult],
         original_fixtures: list[GoldenFixture] | None = None,
         operating_memory: dict[str, Any] | None = None,
+        inspect_context: dict[str, Any] | None = None,
         skill_path: str | Path | None = None,
         skill_name: str | None = None,
     ) -> ProposalReport:
@@ -126,6 +127,9 @@ class ProposalEngine:
             **memory_context,
             "skill_profile": skill_profile,
         }
+        if inspect_context:
+            memory_context["inspect_context"] = inspect_context
+            memory_context["inspect_focus"] = self._extract_inspect_focus(inspect_context)
         
         # Enrich memory context with brain wisdom if available
         if self.brain and skill_name:
@@ -170,6 +174,8 @@ class ProposalEngine:
             f"Update skill instructions: fields [{mismatch_str}] don't match expected output. "
             f"Review SKILL.md guidance for {result.fixture_name}."
         )
+        if self._is_inspect_hotspot(result.fixture_name, memory_context):
+            description += " Keep the patch fixture-local and avoid broad skill-wide rewrites."
         if hints:
             description += f" Memory hints: {hints}"
 
@@ -185,6 +191,7 @@ class ProposalEngine:
             "suggestion": f"Review and tighten instructions for {result.fixture_name}",
             "memory_hints": hints,
             "memory_bias": self._bias_detail(result.fixture_name, memory_context),
+            "scope": self._proposal_scope(result.fixture_name, memory_context),
         }
 
         return PatchProposal(
@@ -224,6 +231,8 @@ class ProposalEngine:
             f"Add supporting artifact for {result.fixture_name} so risky behavior is documented in a structure-aware location. "
             f"Target: {artifact_plan['target_path']}."
         )
+        if self._is_inspect_hotspot(result.fixture_name, memory_context):
+            description += " Use it to constrain the next fix to this hotspot before touching adjacent fixtures."
         content = {
             "target_path": artifact_plan["target_path"],
             "format": artifact_plan["format"],
@@ -233,6 +242,7 @@ class ProposalEngine:
             "memory_hints": hints,
             "memory_bias": self._bias_detail(result.fixture_name, memory_context),
             "skill_profile": skill_profile,
+            "scope": self._proposal_scope(result.fixture_name, memory_context),
         }
         return PatchProposal(
             type="artifact",
@@ -257,6 +267,8 @@ class ProposalEngine:
             f"Add regression test for {result.fixture_name}. "
             f"Current output doesn't match expected; lock in the expected behavior."
         )
+        if self._is_inspect_hotspot(result.fixture_name, memory_context):
+            description += " Prioritize this hotspot fixture before adding broader coverage."
         hints = self._memory_hints(result.fixture_name, memory_context)
         if hints:
             description += f" Memory hints: {hints}"
@@ -266,6 +278,7 @@ class ProposalEngine:
             "reason": "Prevent regression of this failure",
             "memory_hints": hints,
             "memory_bias": self._bias_detail(result.fixture_name, memory_context),
+            "scope": self._proposal_scope(result.fixture_name, memory_context),
         }
 
         confidence = self._base_confidence(0.90, result.fixture_name, "test_case", memory_context)
@@ -301,6 +314,7 @@ class ProposalEngine:
             "next_step": "Amend the skill code or instructions to match expected output",
             "memory_hints": hints,
             "memory_bias": self._bias_detail(result.fixture_name, memory_context),
+            "scope": self._proposal_scope(result.fixture_name, memory_context),
         }
 
         severity = "critical" if mismatch_count > 1 or self._fixture_is_regression_prone(result.fixture_name, memory_context) else "warning"
@@ -407,20 +421,59 @@ class ProposalEngine:
     def _promotion_profile(self, fixture_name: str, memory_context: dict[str, Any]) -> dict[str, Any]:
         return ((memory_context.get("proposal_hints") or {}).get("promotion_profiles") or {}).get(fixture_name, {})
 
-    def _proposal_sort_key(self, proposal: PatchProposal, memory_context: dict[str, Any]) -> tuple[int, int, int, float]:
+    def _proposal_sort_key(self, proposal: PatchProposal, memory_context: dict[str, Any]) -> tuple[int, int, int, int, int, float]:
+        inspect_focus = self._inspect_focus_map(memory_context)
         preferred_types = set(
             self._fixture_profile(proposal.fixture_name, memory_context).get("prefer_types", [])
             or (memory_context.get("proposal_hints") or {}).get("prefer_types", [])
         )
         promotion_profile = self._promotion_profile(proposal.fixture_name, memory_context)
+        hotspot_priority = 0 if proposal.fixture_name in inspect_focus.get("hotspot_fixtures", set()) else 1
         regression_priority = 0 if self._fixture_is_regression_prone(proposal.fixture_name, memory_context) else 1
         protected_priority = 0 if promotion_profile.get("historically_protected") else 1
         if promotion_profile.get("historically_protected"):
             type_priority_map = {"test_case": 0, "artifact": 1, "instruction": 2, "reasoning": 3}
         else:
             type_priority_map = {"instruction": 0, "artifact": 1, "test_case": 2, "reasoning": 3}
+        if proposal.fixture_name in inspect_focus.get("hotspot_fixtures", set()):
+            type_priority_map = {"test_case": 0, "artifact": 1, "instruction": 2, "reasoning": 3}
         preferred_priority = 0 if proposal.type in preferred_types else 1
-        return (regression_priority, protected_priority, preferred_priority, type_priority_map.get(proposal.type, 9), -proposal.confidence)
+        return (hotspot_priority, regression_priority, protected_priority, preferred_priority, type_priority_map.get(proposal.type, 9), -proposal.confidence)
+
+    def _extract_inspect_focus(self, inspect_context: dict[str, Any]) -> dict[str, Any]:
+        hotspot_fixtures: list[str] = []
+        fixture_hotspots = inspect_context.get("fixture_hotspots") or {}
+        for bucket in ("regressed", "stable_fail"):
+            for item in fixture_hotspots.get(bucket, []):
+                fixture_name = item.get("fixture_name")
+                if fixture_name and fixture_name not in hotspot_fixtures:
+                    hotspot_fixtures.append(fixture_name)
+        return {
+            "hotspot_fixtures": hotspot_fixtures,
+            "priorities": list(inspect_context.get("priorities") or []),
+            "hypotheses": list(inspect_context.get("hypotheses") or []),
+        }
+
+    def _inspect_focus_map(self, memory_context: dict[str, Any]) -> dict[str, Any]:
+        inspect_focus = memory_context.get("inspect_focus") or {}
+        hotspot_fixtures = inspect_focus.get("hotspot_fixtures") or []
+        return {
+            **inspect_focus,
+            "hotspot_fixtures": set(hotspot_fixtures),
+        }
+
+    def _is_inspect_hotspot(self, fixture_name: str, memory_context: dict[str, Any]) -> bool:
+        return fixture_name in self._inspect_focus_map(memory_context).get("hotspot_fixtures", set())
+
+    def _proposal_scope(self, fixture_name: str, memory_context: dict[str, Any]) -> dict[str, Any]:
+        inspect_focus = self._inspect_focus_map(memory_context)
+        is_hotspot = fixture_name in inspect_focus.get("hotspot_fixtures", set())
+        return {
+            "mode": "fixture_hotspot" if is_hotspot else "normal",
+            "fixture_local_only": is_hotspot,
+            "focused_fixture": fixture_name if is_hotspot else None,
+            "hotspot_fixtures": sorted(inspect_focus.get("hotspot_fixtures", set())),
+        }
 
     def _skill_structure_profile(self, skill_path: str | Path | None) -> dict[str, Any]:
         if not skill_path:
