@@ -70,6 +70,7 @@ class NightlyOrchestratorRunner:
             "kiro-dev-assistant",
             "kiro-content-calendar",
             "kiro-ugc-brief",
+            "kiro-shortform-engine",
         ]
 
     def discover_installed_skills(self) -> Dict[str, Path]:
