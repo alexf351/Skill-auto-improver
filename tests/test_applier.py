@@ -192,6 +192,39 @@ class SkillPatchApplierTests(unittest.TestCase):
             self.assertEqual(report.skipped_count, 1)
             self.assertIn("already exists", report.skipped[0].detail)
 
+    def test_inspect_backups_can_link_trial_history_by_backup_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp)
+            (skill_dir / "SKILL.md").write_text("# Demo Skill\n", encoding="utf-8")
+
+            applier = SkillPatchApplier(skill_dir)
+            report = applier.apply([self._instruction_proposal()])
+
+            inspections = applier.inspect_backups(
+                history_entries=[
+                    {
+                        "timestamp": "2026-04-08T11:00:00+00:00",
+                        "accepted": True,
+                        "rolled_back": False,
+                        "acceptance_reason": "recovered fixtures without regressions",
+                        "fixture_names": ["greeting_test"],
+                        "backup_refs": [
+                            {
+                                "backup_id": report.applied[0].backup_id,
+                                "target_path": report.applied[0].target_path,
+                                "proposal_type": report.applied[0].proposal_type,
+                                "fixture_name": report.applied[0].fixture_name,
+                            }
+                        ],
+                    }
+                ],
+            )
+
+            self.assertEqual(len(inspections), 1)
+            self.assertEqual(len(inspections[0].trial_refs), 1)
+            self.assertEqual(inspections[0].trial_refs[0]["acceptance_reason"], "recovered fixtures without regressions")
+            self.assertEqual(inspections[0].trial_refs[0]["backup_ref"]["backup_id"], report.applied[0].backup_id)
+
     def test_reasoning_proposals_are_skipped_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             skill_dir = Path(tmp)
@@ -310,6 +343,9 @@ class SkillPatchApplierTests(unittest.TestCase):
             report = applier.restore_backup(backup.backup_path)
 
             self.assertTrue(report.restored)
+            self.assertTrue(report.checksum_verified)
+            self.assertIsNotNone(report.pre_restore_backup_path)
+            self.assertTrue(Path(report.pre_restore_backup_path).exists())
             self.assertEqual(skill_md.read_text(encoding="utf-8"), "# Demo Skill\n")
 
     def test_resolve_backup_can_find_entry_by_backup_id(self):
@@ -331,6 +367,25 @@ class SkillPatchApplierTests(unittest.TestCase):
             report = applier.restore_backup(skill_dir / ".skill-auto-improver" / "backups" / "missing.bak")
             self.assertFalse(report.restored)
             self.assertEqual(report.detail, "backup not found")
+
+    def test_restore_backup_rejects_tampered_backup_when_checksum_mismatches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp)
+            skill_md = skill_dir / "SKILL.md"
+            skill_md.write_text("# Demo Skill\n", encoding="utf-8")
+
+            applier = SkillPatchApplier(skill_dir)
+            applier.apply([self._instruction_proposal()])
+            backup = Path(applier.list_backups()[0].backup_path)
+            backup.write_text("tampered\n", encoding="utf-8")
+
+            skill_md.write_text("# Demo Skill\n\nBROKEN\n", encoding="utf-8")
+            report = applier.restore_backup(backup)
+
+            self.assertFalse(report.restored)
+            self.assertFalse(report.checksum_verified)
+            self.assertEqual(report.detail, "backup checksum verification failed")
+            self.assertEqual(skill_md.read_text(encoding="utf-8"), "# Demo Skill\n\nBROKEN\n")
 
     def test_restore_latest_backup_restores_newest_matching_target(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -360,6 +415,33 @@ class SkillPatchApplierTests(unittest.TestCase):
             self.assertFalse(report.restored)
             self.assertIn("no backups found", report.detail)
             self.assertTrue(report.target_path.endswith("golden-fixtures.json"))
+
+
+    def test_inspect_backups_shows_checksum_verified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp)
+            skill_md = skill_dir / "SKILL.md"
+            skill_md.write_text("# Demo Skill\n", encoding="utf-8")
+
+            applier = SkillPatchApplier(skill_dir)
+            report = applier.apply([self._instruction_proposal()])
+            backup_path = Path(report.applied[0].backup_path)
+
+            # Valid backup
+            inspections = applier.inspect_backups(limit=1)
+            self.assertEqual(len(inspections), 1)
+            self.assertTrue(inspections[0].checksum_verified)
+
+            # Tamper backup
+            backup_path.write_text("tampered\n", encoding="utf-8")
+            inspections = applier.inspect_backups(limit=1)
+            self.assertFalse(inspections[0].checksum_verified)
+
+            # Missing checksum file (simulate by removing)
+            checksum_path = applier._backup_checksum_path(backup_path)
+            checksum_path.unlink()
+            inspections = applier.inspect_backups(limit=1)
+            self.assertFalse(inspections[0].checksum_verified)
 
 
 if __name__ == "__main__":

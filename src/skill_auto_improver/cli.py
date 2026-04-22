@@ -13,8 +13,6 @@ from .applier import SkillPatchApplier
 from .models import RunTrace, StepResult
 from .logger import TraceLogger
 from .checklist_evaluator import ChecklistLoader, ChecklistEvaluator
-from .shared_brain import SharedBrain
-from .orchestrator import MultiSkillOrchestrator, SkillTrialConfig
 from .trial_workspace import TrialWorkspaceCompiler, render_trial_workspace_markdown
 
 
@@ -137,6 +135,8 @@ def _read_jsonl_tail(path: Path, *, limit: int) -> list[dict[str, Any]]:
 
 
 def _load_orchestration_configs(path: str | Path) -> list[SkillTrialConfig]:
+    from .orchestrator import SkillTrialConfig
+
     raw = _load_json(path)
     if not isinstance(raw, list):
         raise ValueError("orchestration config file must be a list")
@@ -306,6 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--skill-name", default=None, help="Optional skill name for focused detail")
     dashboard.add_argument("--limit", type=int, default=5, help="Max items per dashboard section")
 
+    promotion_dashboard = subparsers.add_parser(
+        "promotion-dashboard",
+        help="Show learned promotion-rule state and proposal auto-apply decisions for a proposal file.",
+    )
+    promotion_dashboard.add_argument("--brain-dir", required=True, help="Path to the shared brain directory")
+    promotion_dashboard.add_argument("--proposals", default=None, help="Optional path to proposal JSON file")
+    promotion_dashboard.add_argument("--skill-name", default="", help="Optional skill name for labeling/evaluation context")
+
     golden = subparsers.add_parser(
         "evaluate-golden",
         help="Evaluate a skill directly against golden fixtures using file/command probes.",
@@ -384,10 +392,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "inspect-backups":
         applier = SkillPatchApplier(args.skill_path)
+        history_entries = _read_jsonl_tail(Path(args.skill_path) / "data" / "run-history.jsonl", limit=50)
         result = {
             "skill_path": args.skill_path,
             "backup_count": len(applier.list_backups()),
-            "backups": [item.to_dict() for item in applier.inspect_backups(limit=args.limit, target_name=args.target_name)],
+            "backups": [
+                item.to_dict()
+                for item in applier.inspect_backups(
+                    limit=args.limit,
+                    target_name=args.target_name,
+                    history_entries=history_entries,
+                )
+            ],
         }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
@@ -427,6 +443,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "suggest-fixtures":
+        from .shared_brain import SharedBrain
+
         brain = SharedBrain(args.brain_dir)
         suggestions = brain.suggest_fixture_templates(args.fixture_name, limit=args.limit)
         result = {
@@ -439,8 +457,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "brain-dashboard":
+        from .shared_brain import SharedBrain
+
         brain = SharedBrain(args.brain_dir)
         result = brain.summarize_dashboard(args.skill_name, limit=args.limit)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "promotion-dashboard":
+        from .orchestrator import MultiSkillOrchestrator, SkillTrialConfig
+
+        orchestrator = MultiSkillOrchestrator(args.brain_dir)
+        config = SkillTrialConfig(
+            skill_path=".",
+            skill_name=args.skill_name or "adhoc_skill",
+            proposals_path=args.proposals,
+        )
+        result = {
+            "brain_dir": str(args.brain_dir),
+            "skill_name": config.skill_name,
+            "proposals_path": str(args.proposals) if args.proposals else None,
+            "rules_dashboard": orchestrator.promotion_rules.summarize_dashboard(),
+            "promotion_rules": orchestrator._promotion_rule_context(config),
+        }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
@@ -468,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if evaluation.get("failed", 0) == 0 else 1
 
     if args.command == "run-orchestration":
+        from .orchestrator import MultiSkillOrchestrator
+
         configs = _load_orchestration_configs(args.config)
         orchestrator = MultiSkillOrchestrator(args.brain_dir)
         run = orchestrator.run_orchestration(configs, logs_dir=args.logs_dir)

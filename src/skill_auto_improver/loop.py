@@ -555,6 +555,8 @@ def create_safe_patch_trial_stage(
             }
         )
         effective_rollback_on_regression = merged_policy.get("rollback_on_regression", rollback_on_regression)
+        accepted_type_values = merged_policy.get("accepted_types") or accepted_types
+        effective_accepted_types = set(accepted_type_values) if accepted_type_values else None
         effective_min_confidence = float(merged_policy.get("min_confidence") or 0.0)
         severity_values = merged_policy.get("accepted_severities") or accepted_severities
         effective_accepted_severities = set(severity_values) if severity_values else None
@@ -602,7 +604,7 @@ def create_safe_patch_trial_stage(
 
         apply_report = applier.apply(
             proposals,
-            accepted_types=accepted_types,
+            accepted_types=effective_accepted_types,
             mode="apply",
             min_confidence=effective_min_confidence,
             accepted_severities=effective_accepted_severities,

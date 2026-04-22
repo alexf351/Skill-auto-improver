@@ -344,6 +344,12 @@ class CLITests(unittest.TestCase):
             self.assertTrue(payload["backups"][0]["current_exists"])
             self.assertGreater(payload["backups"][0]["current_diff"]["added_lines"], 0)
             self.assertTrue(any("BROKEN" in line for line in payload["backups"][0]["current_diff"]["preview"]))
+            self.assertEqual(len(payload["backups"][0]["trial_refs"]), 1)
+            self.assertTrue(payload["backups"][0]["trial_refs"][0]["accepted"])
+            self.assertEqual(
+                payload["backups"][0]["trial_refs"][0]["backup_ref"]["target_path"],
+                str(skill_dir / "SKILL.md"),
+            )
 
     def test_restore_backup_command_accepts_backup_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -473,6 +479,70 @@ class CLITests(unittest.TestCase):
             self.assertEqual(payload["most_active_skills"][0]["skill_name"], "weather")
             self.assertEqual(payload["skill"]["skill_name"], "weather")
             self.assertEqual(payload["fixture_suggestions"][0]["pattern_name"], "weather_forecast")
+
+    def test_promotion_dashboard_command_returns_rule_stats_and_decisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            brain_dir = root / "shared-brain"
+            brain_dir.mkdir()
+            proposals_path = root / "proposals.json"
+            proposals_path.write_text(json.dumps([
+                {
+                    "type": "instruction",
+                    "fixture_name": "formal_greeting",
+                    "description": "tighten formal greeting guidance",
+                    "content": {"suggestion": "Keep greeting formal"},
+                    "severity": "warning",
+                    "confidence": 0.9,
+                },
+                {
+                    "type": "instruction",
+                    "fixture_name": "unknown_fixture",
+                    "description": "unknown fixture guidance",
+                    "content": {},
+                    "severity": "warning",
+                    "confidence": 0.8,
+                }
+            ]), encoding="utf-8")
+
+            from skill_auto_improver.shared_brain import SharedBrain
+            from skill_auto_improver.promotion_rules import PromotionRulesEngine
+
+            brain = SharedBrain(brain_dir)
+            wisdom = brain.record_promotion(
+                fixture_name="formal_greeting",
+                skill_name="weather",
+                proposal_types=["instruction"],
+                reason="Recovered safely",
+                confidence=0.93,
+            )
+            brain.record_promotion(
+                fixture_name="formal_greeting",
+                skill_name="kiro",
+                proposal_types=["instruction"],
+                reason="Recovered safely again",
+                confidence=0.94,
+            )
+            engine = PromotionRulesEngine(brain_dir)
+            engine.learn_from_promotion(wisdom)
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main([
+                    "promotion-dashboard",
+                    "--brain-dir", str(brain_dir),
+                    "--proposals", str(proposals_path),
+                    "--skill-name", "demo_skill",
+                ])
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["rules_dashboard"]["counts"]["total"], 1)
+            self.assertEqual(payload["promotion_rules"]["evaluated_count"], 2)
+            self.assertEqual(payload["promotion_rules"]["auto_apply_count"], 1)
+            self.assertEqual(payload["promotion_rules"]["decisions"][0]["fixture_name"], "formal_greeting")
+            self.assertTrue(payload["promotion_rules"]["decisions"][0]["should_auto_apply"])
+            self.assertTrue(payload["promotion_rules"]["decisions"][1]["escalation_required"])
 
     def test_run_orchestration_command_executes_batch_config(self):
         with tempfile.TemporaryDirectory() as tmp:

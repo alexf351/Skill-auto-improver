@@ -286,6 +286,7 @@ class OperatingMemory:
                 "promotion_profiles": promotion_profiles,
             },
             "policy": {
+                "accepted_types": proposal_preferences.get("accepted_types", []),
                 "min_confidence": proposal_preferences.get("min_confidence"),
                 "accepted_severities": proposal_preferences.get("accepted_severities", []),
                 "rollback_on_regression": proposal_preferences.get("rollback_on_regression", True),
@@ -304,6 +305,8 @@ class OperatingMemory:
     def merge_policy(self, policy: dict[str, Any]) -> dict[str, Any]:
         memory_policy = self.load_context().get("policy", {})
         merged = dict(policy)
+        if not merged.get("accepted_types") and memory_policy.get("accepted_types"):
+            merged["accepted_types"] = memory_policy["accepted_types"]
         if merged.get("min_confidence") in (None, 0, 0.0) and memory_policy.get("min_confidence") not in (None, ""):
             merged["min_confidence"] = memory_policy["min_confidence"]
         if not merged.get("accepted_severities") and memory_policy.get("accepted_severities"):
@@ -350,6 +353,17 @@ class OperatingMemory:
             "pass_rate_delta": ab.get("pass_rate_delta", 0.0),
             "recovered_count": ab.get("recovered_count", 0),
             "regressed_count": ab.get("regressed_count", 0),
+            "acceptance_reason": result.get("acceptance_reason", ""),
+            "backup_refs": [
+                {
+                    "backup_id": change.get("backup_id"),
+                    "target_path": change.get("target_path"),
+                    "proposal_type": change.get("proposal_type"),
+                    "fixture_name": change.get("fixture_name"),
+                }
+                for change in apply.get("applied", [])
+                if change.get("backup_id")
+            ],
             "policy": policy,
         }
         with self.history_path.open("a", encoding="utf-8") as handle:

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 import difflib
+import hashlib
 import json
 import shutil
 from datetime import datetime, timezone
@@ -75,6 +76,8 @@ class BackupInspection:
     exists: bool
     current_exists: bool
     current_diff: dict[str, Any] | None = None
+    trial_refs: list[dict[str, Any]] = field(default_factory=list)
+    checksum_verified: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -87,6 +90,8 @@ class RestoreReport:
     target_path: str
     restored: bool
     detail: str
+    checksum_verified: bool = False
+    pre_restore_backup_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -221,9 +226,16 @@ class SkillPatchApplier:
             )
         return entries
 
-    def inspect_backups(self, *, limit: int | None = None, target_name: str | None = None) -> list[BackupInspection]:
+    def inspect_backups(
+        self,
+        *,
+        limit: int | None = None,
+        target_name: str | None = None,
+        history_entries: list[dict[str, Any]] | None = None,
+    ) -> list[BackupInspection]:
         inspections: list[BackupInspection] = []
         entries = self.list_backups()
+        history_by_backup_id = self._history_by_backup_id(history_entries or [])
         if target_name:
             entries = [entry for entry in entries if Path(entry.target_path).name == target_name]
         for entry in entries[:limit]:
@@ -231,12 +243,14 @@ class SkillPatchApplier:
             target_path = Path(entry.target_path)
             current_exists = target_path.exists()
             current_diff = None
+            backup_id = self._backup_id(backup_path)
             if entry.exists and current_exists:
                 current_diff = self._build_diff_summary(
                     backup_path.read_text(encoding="utf-8"),
                     target_path.read_text(encoding="utf-8"),
                     target_path=target_path,
                 )
+            checksum_verified = self._verify_backup_checksum(backup_path) if entry.exists else None
             inspections.append(
                 BackupInspection(
                     target_path=entry.target_path,
@@ -245,6 +259,8 @@ class SkillPatchApplier:
                     exists=entry.exists,
                     current_exists=current_exists,
                     current_diff=current_diff,
+                    trial_refs=history_by_backup_id.get(backup_id or "", []),
+                    checksum_verified=checksum_verified,
                 )
             )
         return inspections
@@ -272,8 +288,23 @@ class SkillPatchApplier:
                 detail="backup not found",
             )
 
+        checksum_verified = self._verify_backup_checksum(backup_path)
         target_name, _ = self._parse_backup_name(backup_path.name)
         target_path = self.skill_path / target_name
+        if not checksum_verified:
+            return RestoreReport(
+                skill_path=str(self.skill_path),
+                backup_path=str(backup_path),
+                target_path=str(target_path),
+                restored=False,
+                detail="backup checksum verification failed",
+                checksum_verified=False,
+            )
+
+        pre_restore_backup_path = None
+        if target_path.exists():
+            pre_restore_backup_path = str(self._backup_file(target_path))
+
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(backup_path, target_path)
 
@@ -283,6 +314,8 @@ class SkillPatchApplier:
             target_path=str(target_path),
             restored=True,
             detail="backup restored",
+            checksum_verified=True,
+            pre_restore_backup_path=pre_restore_backup_path,
         )
 
     def restore_latest_backup(self, *, target_name: str) -> RestoreReport:
@@ -465,6 +498,7 @@ class SkillPatchApplier:
         relative_name = path.resolve().relative_to(self.skill_path.resolve()).as_posix().replace("/", "__")
         backup_path = self.backups_dir / f"{relative_name}.{utc_timestamp()}.bak"
         shutil.copy2(path, backup_path)
+        self._write_backup_checksum(backup_path)
         return backup_path
 
     def _backup_id(self, backup_path: Path | None) -> str | None:
@@ -472,6 +506,25 @@ class SkillPatchApplier:
             return None
         _, created_at = self._parse_backup_name(backup_path.name)
         return created_at
+
+    def _backup_checksum_path(self, backup_path: Path) -> Path:
+        return backup_path.with_suffix(backup_path.suffix + ".sha256")
+
+    def _compute_file_checksum(self, path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _write_backup_checksum(self, backup_path: Path) -> None:
+        checksum_path = self._backup_checksum_path(backup_path)
+        checksum_path.write_text(self._compute_file_checksum(backup_path) + "\n", encoding="utf-8")
+
+    def _verify_backup_checksum(self, backup_path: Path) -> bool:
+        checksum_path = self._backup_checksum_path(backup_path)
+        if not checksum_path.exists():
+            return False
+        expected = checksum_path.read_text(encoding="utf-8").strip()
+        if not expected:
+            return False
+        return self._compute_file_checksum(backup_path) == expected
 
     def _build_diff_summary(self, before: str, after: str, *, target_path: Path) -> dict[str, Any]:
         diff_lines = list(
@@ -563,4 +616,27 @@ class SkillPatchApplier:
             if not proposal.fixture_name:
                 continue
             grouped.setdefault(proposal.fixture_name, set()).add(proposal.type)
+        return grouped
+
+    def _history_by_backup_id(self, history_entries: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for entry in history_entries:
+            if not isinstance(entry, dict):
+                continue
+            for backup_ref in entry.get("backup_refs", []):
+                if not isinstance(backup_ref, dict):
+                    continue
+                backup_id = str(backup_ref.get("backup_id") or "").strip()
+                if not backup_id:
+                    continue
+                grouped.setdefault(backup_id, []).append(
+                    {
+                        "timestamp": entry.get("timestamp"),
+                        "accepted": entry.get("accepted", False),
+                        "rolled_back": entry.get("rolled_back", False),
+                        "acceptance_reason": entry.get("acceptance_reason", ""),
+                        "fixture_names": entry.get("fixture_names", []),
+                        "backup_ref": backup_ref,
+                    }
+                )
         return grouped

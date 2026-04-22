@@ -10,7 +10,12 @@ from .loop import (
 )
 from .ab_evaluator import ABEvaluator, ABReport
 from .applier import SkillPatchApplier, ApplyReport, BackupEntry, RestoreReport
-from .cli import main as cli_main
+
+
+def cli_main(argv=None):
+    from .cli import main
+
+    return main(argv)
 
 __all__ = [
     "SkillAutoImprover",

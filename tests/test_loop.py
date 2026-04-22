@@ -20,6 +20,7 @@ from skill_auto_improver.loop import (
     create_trial_workspace_stage,
 )
 from skill_auto_improver.evaluator import GoldenEvaluator, GoldenFixture
+from skill_auto_improver.operating_memory import scaffold_operating_memory
 
 
 class LoopTests(unittest.TestCase):
@@ -330,6 +331,64 @@ class LoopTests(unittest.TestCase):
             self.assertEqual(result['apply']['skipped_count'], 0)
             self.assertIn('Use the formal greeting.', (skill_dir / 'SKILL.md').read_text(encoding='utf-8'))
             self.assertNotIn('Do not use the formal greeting.', (skill_dir / 'SKILL.md').read_text(encoding='utf-8'))
+
+    def test_safe_patch_trial_honors_memory_accepted_types_when_cli_types_unset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / 'demo-skill'
+            skill_dir.mkdir()
+            (skill_dir / 'SKILL.md').write_text('# Demo Skill\n', encoding='utf-8')
+            scaffold_operating_memory(skill_dir)
+            (skill_dir / 'data' / 'preferences.json').write_text(json.dumps({
+                'proposal': {
+                    'accepted_types': ['artifact'],
+                }
+            }), encoding='utf-8')
+            fixtures = [GoldenFixture(name='greeting_test', input_data={'name': 'Alice'}, expected_output={'greeting': 'Hello, Alice!'})]
+
+            def evaluate_skill(skill_path: str, context: dict, phase: str) -> dict:
+                skill_root = Path(skill_path)
+                artifact_path = skill_root / 'references' / 'auto-improver' / 'greeting_test.md'
+                artifact_exists = artifact_path.exists()
+                return {
+                    'greeting_test': {
+                        'greeting': 'Hello, Alice!' if artifact_exists else 'Hi, Alice!'
+                    }
+                }
+
+            result = create_safe_patch_trial_stage(fixtures, evaluate_skill)({
+                'skill_path': str(skill_dir),
+                'amend': {'proposals': [
+                    {
+                        'fixture_name': 'greeting_test',
+                        'type': 'instruction',
+                        'description': 'Instruction proposal should be blocked by memory policy',
+                        'content': {'suggestion': 'Use the formal greeting.', 'mismatched_fields': ['greeting']},
+                        'severity': 'warning',
+                        'confidence': 0.95,
+                    },
+                    {
+                        'fixture_name': 'greeting_test',
+                        'type': 'artifact',
+                        'description': 'Artifact proposal allowed by memory policy',
+                        'content': {
+                            'target_path': 'references/auto-improver/greeting_test.md',
+                            'format': 'markdown_append',
+                            'section_title': 'Greeting safeguard',
+                            'body': '- Keep the greeting formal.\n',
+                        },
+                        'severity': 'warning',
+                        'confidence': 0.95,
+                    },
+                ]},
+            })
+
+            self.assertEqual(result['policy']['accepted_types'], ['artifact'])
+            self.assertTrue(result['accepted'])
+            self.assertEqual(result['apply']['applied_count'], 1)
+            self.assertEqual(result['apply']['applied'][0]['proposal_type'], 'artifact')
+            self.assertEqual(result['apply']['skipped'][0]['proposal_type'], 'instruction')
+            self.assertIn('proposal type not accepted', result['apply']['skipped'][0]['detail'])
+            self.assertTrue((skill_dir / 'references' / 'auto-improver' / 'greeting_test.md').exists())
 
     def test_recent_run_observer_summarizes_trace_history_for_skill(self):
         with tempfile.TemporaryDirectory() as tmp:

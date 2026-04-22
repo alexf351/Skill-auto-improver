@@ -23,6 +23,8 @@ from .loop import SkillAutoImprover, RunTrace
 from .models import StepResult
 from .shared_brain import SharedBrain
 from .logger import TraceLogger
+from .promotion_rules import PromotionRulesEngine
+from .proposer import PatchProposal
 
 
 @dataclass
@@ -185,6 +187,7 @@ class MultiSkillOrchestrator:
     ):
         self.brain_dir = Path(brain_dir)
         self.shared_brain = SharedBrain(self.brain_dir)
+        self.promotion_rules = PromotionRulesEngine(self.brain_dir)
         self.create_improver = create_improver or self._create_default_improver
 
     @staticmethod
@@ -339,6 +342,7 @@ class MultiSkillOrchestrator:
             ]
             for fixture_name in fixture_names
         }
+        promotion_rules = self._promotion_rule_context(config)
         return {
             "config": {
                 "skill_name": config.skill_name,
@@ -353,6 +357,62 @@ class MultiSkillOrchestrator:
             "brain": self.get_skill_context_for_trial(config.skill_name),
             "fixture_names": fixture_names,
             "fixture_suggestions": fixture_suggestions,
+            "promotion_rules": promotion_rules,
+        }
+
+    def _load_proposals_for_rules(self, proposals_path: Optional[str | Path]) -> list[dict[str, Any]]:
+        if not proposals_path:
+            return []
+        path = Path(proposals_path)
+        if not path.exists():
+            return []
+        try:
+            payload = self._validate_json_payload(path)
+            normalized = self._normalize_proposals_payload(payload)
+        except ValueError:
+            return []
+        return [item for item in normalized if isinstance(item, dict)]
+
+    def _promotion_rule_context(self, config: SkillTrialConfig) -> dict[str, Any]:
+        proposals_payload = self._load_proposals_for_rules(config.proposals_path)
+        decisions: list[dict[str, Any]] = []
+
+        for item in proposals_payload:
+            fixture_name = str(item.get("fixture_name", "")).strip()
+            proposal_type = str(item.get("type", "")).strip().lower()
+            if not fixture_name or not proposal_type:
+                continue
+
+            decision = self.promotion_rules.evaluate_proposal(
+                proposal=PatchProposal(
+                    type=proposal_type,
+                    description=str(item.get("description", "")).strip(),
+                    content=item.get("content") if isinstance(item.get("content"), dict) else {},
+                    fixture_name=fixture_name,
+                    severity=str(item.get("severity", "info")).strip().lower() or "info",
+                    confidence=float(item.get("confidence", 0.0) or 0.0),
+                ),
+                skill_name=config.skill_name,
+                promotion_wisdom_list=self.shared_brain.get_promotion_wisdom_for_fixture(fixture_name),
+            )
+            decisions.append({
+                "fixture_name": fixture_name,
+                "proposal_type": proposal_type,
+                "should_auto_apply": decision.should_auto_apply,
+                "escalation_required": decision.escalation_required,
+                "reasoning": decision.reasoning,
+                "escalation_reason": decision.escalation_reason,
+                "matched_rule": decision.rule_matched.name if decision.rule_matched else None,
+                "matched_wisdom": decision.matched_wisdom.id if decision.matched_wisdom else None,
+                "confidence": decision.confidence,
+            })
+
+        return {
+            "evaluated_count": len(decisions),
+            "auto_apply_count": sum(1 for item in decisions if item["should_auto_apply"]),
+            "escalation_count": sum(1 for item in decisions if item["escalation_required"]),
+            "decisions": decisions,
+            "stats": self.promotion_rules.get_stats(),
         }
 
     def _validate_json_payload(self, path: Path) -> Any:
@@ -929,6 +989,7 @@ class MultiSkillOrchestrator:
                 )
                 run.promotions_recorded.append(wisdom.id)
                 run.promotions_accepted += 1
+                self.promotion_rules.learn_from_promotion(wisdom)
 
         # Update skill mastery with trial metrics
         self.shared_brain.update_skill_mastery(

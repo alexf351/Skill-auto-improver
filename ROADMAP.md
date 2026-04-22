@@ -25,6 +25,20 @@ Expand to multi-skill orchestration with shared learning across skills.
 
 ## Progress Log
 
+### 2026-04-17 (Daily Autonomous Build Block): Checksum Surface in Backup Inspection
+- Surfaced `checksum_verified` state in `inspect_backups()` output so operators can spot tampered/missing-checksum snapshots before restore
+- `BackupInspection` now computes verification for every listed backup (True/False/None)
+- CLI `inspect-backups` and `backup-history` now expose the field for operator review
+- Added unit coverage proving valid/tampered/missing-checksum handling in inspection
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_applier -v`
+
+### 2026-04-12 (Daily Autonomous Build Block): Checksum-Verified Restore Safety
+- Hardened rollback restores by writing a `.sha256` sidecar for every backup snapshot created by `SkillPatchApplier`
+- `restore_backup()` now verifies backup integrity before overwrite, refuses tampered/missing-checksum backups, and snapshots the current target before restoration
+- `RestoreReport` now exposes `checksum_verified` and `pre_restore_backup_path` so CLI/operators can audit restore safety
+- Added unit coverage for successful verified restore and checksum-mismatch rejection
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_applier -v`
+
 ### 2026-04-07 (Daily Autonomous Build Block): Inspect-Driven Hotspot Proposal Narrowing
 - Connected inspect-stage hotspot signals to amendment proposal generation instead of leaving inspect as advisory-only
 - `ProposalEngine.generate_proposals()` now accepts optional `inspect_context` parameter
@@ -139,12 +153,18 @@ Expand to multi-skill orchestration with shared learning across skills.
 - **Total: 47 unit tests, all passing**
 
 ## Next Highest-Leverage Increment
-- Tighten proposal acceptance policy (e.g. confidence/severity thresholds before auto-apply)
-- Add an operator-facing backup/diff browser helper on top of the new audit metadata
+- Surface checksum verification state in backup inspection/history views so operators can spot stale or tampered snapshots before requesting restore
 - Expand the CLI beyond file-content probes into pluggable real skill evaluators
  a simple file-content probe evaluator so concrete `SKILL.md` checks can run without custom harness code
 - Added 2 CLI tests covering both safe acceptance and regression-triggered rollback paths
 - **Total: 49 unit tests, all passing**
+
+### 2026-04-08 (Daily Autonomous Build Block): Backup Inspection Linked to Trial History
+- Extended operating-memory run history entries to persist `acceptance_reason` and structured `backup_refs` for every applied backup-bearing change
+- Upgraded `SkillPatchApplier.inspect_backups()` to join backup snapshots with matching trial-history records via `backup_id`
+- `inspect-backups` CLI now shows `trial_refs` beside each backup, so operators can see whether the originating trial was accepted/rolled back, why, and which fixture/proposal created the snapshot
+- Added unit coverage in both applier and CLI layers proving backup-to-trial linking works end to end
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_applier tests.test_cli -v`
 
 ### 2026-03-20: Persistent Operating-Memory Scaffold
 - Added `operating_memory.py` to scaffold a reusable per-skill execution doctrine layer
@@ -256,10 +276,44 @@ Expand to multi-skill orchestration with shared learning across skills.
 - Added interactive demo: `examples/memory_driven_ranking_demo.py` with 5 scenarios
 - **Total: 174 unit tests, all passing** (+27 from memory ranking)
 
+### 2026-04-18 (Daily Autonomous Build Block): Fixed datetime Deprecations in MemoryDrivenRanker
+- Replaced deprecated `datetime.utcnow()` with `datetime.now(timezone.utc)` in `memory_ranking.py` for Python 3.12+ compatibility
+- Updated affected lines in `FixtureSuccessRecord.record_acceptance()`, `record_rejection()`, and `_compute_rank_score()`
+- Full test suite passes without deprecation warnings
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest discover tests/ -v`
+
+### 2026-04-19 (Daily Autonomous Build Block): Full Deprecation Cleanup in Memory Ranking
+- Fixed remaining `datetime.utcnow()` deprecations across `FixtureSuccessRecord.record_acceptance()`, `record_rejection()`, and `MemoryDrivenRanker._compute_rank_score()`.
+- Added `timezone` import and switched to `datetime.now(timezone.utc).isoformat()` everywhere.
+- Verified full test suite runs clean: `PYTHONPATH=src python3 -m unittest discover tests/ -v` shows no deprecation warnings.
+- **Targeted checks:** Full suite (271 tests OK, 0 warnings).
+
 ## Next Highest-Leverage Increment
-- Automated promotion rules - Apply learned acceptance rules without operator review
-- Brain-backed recent-trial fusion in operator dashboard output
-- Extend orchestration preflight from command-probe cwd containment into stronger unused-proposal review hints
+- Thread promotion-rule decisions from orchestration context into actual unattended apply-policy enforcement
+- Brain-backed recent-trial fusion in operator dashboard output (e.g., fuse recent trace summaries into operator-facing brain dashboard)
+- Extend orchestration preflight with unused-proposal review hints and promotion-rule pre-apply simulation
+
+### 2026-04-11 (Daily Autonomous Build Block): Promotion-Rule Context in Unattended Orchestration
+- Wired `MultiSkillOrchestrator` to instantiate and use `PromotionRulesEngine` during real orchestration runs instead of leaving the engine standalone-only
+- Added `_promotion_rule_context()` so orchestration context now evaluates proposal files against learned promotion wisdom and exposes per-proposal auto-apply vs escalation decisions (`promotion_rules.decisions`)
+- Trial metadata now includes counts for evaluated proposals, auto-apply candidates, escalation candidates, and rule-engine stats, so unattended runs can inspect learned trust before applying patches
+- Accepted orchestration promotions now feed back into `PromotionRulesEngine.learn_from_promotion(...)`, so repeated cross-skill wins can graduate into future auto-apply rules without a separate manual step
+- Added focused orchestrator coverage for both directions: proposal-decision context loading before a run, and rule learning after accepted promotions across multiple skills
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_orchestrator tests.test_promotion_rules -v`
+
+### 2026-04-10 (Daily Autonomous Build Block): Promotion-Rules Engine Compatibility Repair
+- Repaired the unfinished promotion-rules path so the module now works with real `PatchProposal` objects instead of importing a non-existent `Proposal` type
+- Added `last_updated` persistence to `PromotionRule`, fixing rule refresh bookkeeping for future automated acceptance learning
+- Restored orchestrator/CLI importability, which had been broken by the promotion-rules import error and was taking unattended orchestration offline
+- Added focused promotion-rules coverage for rule learning and auto-apply decisions against real proposal objects
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_promotion_rules tests.test_orchestrator tests.test_cli -v`
+
+### 2026-04-09 (Daily Autonomous Build Block): Memory-Backed Accepted-Type Gates in Safe Trials
+- Closed a real policy gap in guarded patch trials: operating-memory `proposal.accepted_types` preferences were being loaded into context but not actually enforced when CLI/runtime `accepted_types` was left unset
+- `OperatingMemory.load_context()` and `merge_policy()` now surface and carry `accepted_types` alongside the existing confidence/severity gates
+- `create_safe_patch_trial_stage()` now derives `effective_accepted_types` from merged memory policy before calling the applier, so unattended runs honor skill-local patch-type restrictions
+- Added focused loop coverage proving a memory policy of `accepted_types=['artifact']` blocks instruction writes, allows the artifact proposal through, and still accepts the recovered run
+- **Targeted checks:** `PYTHONPATH=src python3 -m unittest tests.test_loop -v`
 
 ### 2026-04-05 (Daily Autonomous Build Block): Command-Probe CWD Containment Guards
 - Hardened command-based fixture evaluation so `input_data.cwd` cannot escape the target skill root

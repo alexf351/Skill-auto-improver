@@ -1,0 +1,108 @@
+{
+  "run_id": "a6add380-309c-4267-afd3-da9ef0998cba",
+  "started_at": "2026-04-08T09:00:00Z",
+  "finished_at": "2026-04-08T09:00:00Z",
+  "total_skills": 5,
+  "successful_trials": 5,
+  "rolled_back_trials": 0,
+  "promotions_accepted": 5,
+  "regressions_prevented": 1,
+  "promotions_recorded": [
+    {
+      "skill": "morning-brief",
+      "type": "instruction",
+      "summary": "Added freshness/carry-forward labeling and explicit ignore-list guidance so calm mornings still produce a clear decision delta."
+    },
+    {
+      "skill": "weather-brief",
+      "type": "instruction",
+      "summary": "Added timezone/location discipline so daily weather recommendations stay anchored to Alex's real local day and clock."
+    },
+    {
+      "skill": "kiro-dev-assistant",
+      "type": "instruction",
+      "summary": "Added ownership-point patch planning and safety-note guidance to keep Kiro code changes narrow, safer, and easier to verify."
+    },
+    {
+      "skill": "kiro-content-calendar",
+      "type": "instruction",
+      "summary": "Added calendar stress-test rules so plans stay executable, role-driven, and cut dependency-heavy filler."
+    },
+    {
+      "skill": "kiro-ugc-brief",
+      "type": "instruction",
+      "summary": "Added brief stress-test rules to surface retention moments, failure modes, and simpler fallbacks before handoff."
+    }
+  ],
+  "regressions_recorded": [
+    {
+      "pattern": "audit_only_green_run_followed_by_manual_recovery",
+      "fix": "When the orchestrator goes green with zero proposals, force the next pass to add one operator-visible improvement per target skill."
+    }
+  ],
+  "fixtures_added_to_library": [],
+  "skill_outcomes": {
+    "morning-brief": {
+      "status": "improved",
+      "accepted": true,
+      "rolled_back": false,
+      "applied_count": 1,
+      "skipped_count": 0,
+      "proposal_types": [
+        "instruction"
+      ],
+      "promotions_from_trial": 1,
+      "regressions_from_trial": 0
+    },
+    "weather-brief": {
+      "status": "improved",
+      "accepted": true,
+      "rolled_back": false,
+      "applied_count": 1,
+      "skipped_count": 0,
+      "proposal_types": [
+        "instruction"
+      ],
+      "promotions_from_trial": 1,
+      "regressions_from_trial": 0
+    },
+    "kiro-dev-assistant": {
+      "status": "improved",
+      "accepted": true,
+      "rolled_back": false,
+      "applied_count": 1,
+      "skipped_count": 0,
+      "proposal_types": [
+        "instruction"
+      ],
+      "promotions_from_trial": 1,
+      "regressions_from_trial": 0
+    },
+    "kiro-content-calendar": {
+      "status": "improved",
+      "accepted": true,
+      "rolled_back": false,
+      "applied_count": 1,
+      "skipped_count": 0,
+      "proposal_types": [
+        "instruction"
+      ],
+      "promotions_from_trial": 1,
+      "regressions_from_trial": 0
+    },
+    "kiro-ugc-brief": {
+      "status": "improved",
+      "accepted": true,
+      "rolled_back": false,
+      "applied_count": 1,
+      "skipped_count": 0,
+      "proposal_types": [
+        "instruction"
+      ],
+      "promotions_from_trial": 1,
+      "regressions_from_trial": 0
+    }
+  },
+  "notes": "Manual nightly improvement pass completed to recover from the prior audit-only run; all five target skills received concrete operator-facing instruction upgrades.",
+  "timestamp": "2026-04-08T09:00:00Z"
+}

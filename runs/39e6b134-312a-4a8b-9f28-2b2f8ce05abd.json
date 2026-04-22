@@ -1,0 +1,216 @@
+{
+  "created_at": "2026-04-14T09:02:08+00:00",
+  "finished_at": "2026-04-14T09:02:08+00:00",
+  "metadata": {
+    "evaluation": {
+      "failed": 0,
+      "mode": "golden",
+      "pass_rate": 1.0,
+      "passed": 1,
+      "total": 1
+    },
+    "orchestration": {
+      "brain": {
+        "applicable_directives": [
+          {
+            "applies_to": [
+              "*"
+            ],
+            "auto_apply": true,
+            "created_at": "2026-03-25T09:01:45.191481+00:00",
+            "description": "Never auto-apply proposals below 0.80 confidence across any skill.",
+            "example": "Reject a 0.75-confidence instruction proposal; require manual review.",
+            "id": "cd_001_min_confidence",
+            "last_updated": "2026-03-25T09:01:45.191513+00:00",
+            "title": "Minimum Confidence Floor"
+          },
+          {
+            "applies_to": [
+              "*"
+            ],
+            "auto_apply": true,
+            "created_at": "2026-03-25T09:01:45.191518+00:00",
+            "description": "For any historically broken fixture, require a test_case proposal to accompany instruction proposals.",
+            "example": "Block instruction-only patches to a risky fixture; wait for regression test.",
+            "id": "cd_002_test_case_first",
+            "last_updated": "2026-03-25T09:01:45.191520+00:00",
+            "title": "Test Case Before Instruction"
+          },
+          {
+            "applies_to": [
+              "*"
+            ],
+            "auto_apply": true,
+            "created_at": "2026-03-25T09:01:45.191522+00:00",
+            "description": "Reject patches that change >10 targets or add >100 lines without explicit approval.",
+            "example": "Rollback a patch that touched 15 files; review necessity before retry.",
+            "id": "cd_003_no_churn",
+            "last_updated": "2026-03-25T09:01:45.191524+00:00",
+            "title": "Change Budget Enforcement"
+          }
+        ],
+        "regression_patterns_to_watch": [],
+        "similar_fixtures_in_library": [],
+        "skill_mastery": {
+          "average_proposal_confidence": 0.85,
+          "common_issues": [],
+          "created_at": "2026-03-26T09:03:17.990415+00:00",
+          "fixture_mastery": {},
+          "id": "03861644-896f-48c4-90e3-5387db2a540e",
+          "last_updated": "2026-04-07T09:01:50.762440+00:00",
+          "most_effective_proposal_types": [
+            "test_case",
+            "instruction"
+          ],
+          "regression_incidents": 0,
+          "skill_name": "kiro-ugc-brief",
+          "skill_type": "kiro-ugc-brief",
+          "successful_promotions": 2,
+          "total_trials": 7
+        }
+      },
+      "config": {
+        "accepted_severities": [
+          "warning",
+          "critical"
+        ],
+        "accepted_types": [
+          "instruction",
+          "test_case"
+        ],
+        "enabled": true,
+        "fixtures_path": null,
+        "min_confidence": 0.7,
+        "proposals_path": null,
+        "skill_name": "kiro-ugc-brief",
+        "skill_type": "kiro-ugc-brief"
+      },
+      "fixture_names": [],
+      "fixture_suggestions": {},
+      "preflight": {
+        "issue_count": 0,
+        "issues": [],
+        "ok": true
+      },
+      "promotion_rules": {
+        "auto_apply_count": 0,
+        "decisions": [],
+        "escalation_count": 0,
+        "evaluated_count": 0,
+        "stats": {
+          "avg_min_confidence": 0,
+          "by_proposal_type": {
+            "artifact": 0,
+            "instruction": 0,
+            "test_case": 0
+          },
+          "enabled_rules": 0,
+          "total_rules": 0
+        }
+      }
+    },
+    "patch_trial": {
+      "ab": {
+        "is_safe": true,
+        "pass_rate_delta": 0.0,
+        "recovered_count": 0,
+        "regressed_count": 0
+      },
+      "acceptance_reason": "audit only - no proposals applied",
+      "accepted": false,
+      "apply": {
+        "applied": [],
+        "applied_count": 0,
+        "skipped": [],
+        "skipped_count": 0
+      },
+      "rolled_back": false
+    }
+  },
+  "run_id": "39e6b134-312a-4a8b-9f28-2b2f8ce05abd",
+  "skill_path": "/home/clawd/.openclaw/workspace/skills/kiro-ugc-brief",
+  "status": "ok",
+  "steps": [
+    {
+      "finished_at": "2026-04-14T09:02:08+00:00",
+      "name": "observe",
+      "output": {
+        "char_count": 14921,
+        "has_frontmatter": true,
+        "line_count": 267,
+        "skill_file": "/home/clawd/.openclaw/workspace/skills/kiro-ugc-brief/SKILL.md"
+      },
+      "started_at": "2026-04-14T09:02:08+00:00"
+    },
+    {
+      "finished_at": "2026-04-14T09:02:08+00:00",
+      "name": "amend",
+      "output": {
+        "findings": [],
+        "proposals": [],
+        "reason": "default nightly audit mode",
+        "status": "no_changes_applied"
+      },
+      "started_at": "2026-04-14T09:02:08+00:00"
+    },
+    {
+      "finished_at": "2026-04-14T09:02:08+00:00",
+      "name": "inspect",
+      "output": {
+        "findings": [],
+        "status": "healthy"
+      },
+      "started_at": "2026-04-14T09:02:08+00:00"
+    },
+    {
+      "finished_at": "2026-04-14T09:02:08+00:00",
+      "name": "evaluate",
+      "output": {
+        "failed": 0,
+        "pass_rate": 1.0,
+        "passed": 1,
+        "results": [
+          {
+            "actual": {
+              "status": "healthy"
+            },
+            "delta": {
+              "findings": []
+            },
+            "expected": {
+              "status": "healthy"
+            },
+            "fixture_name": "skill_audit",
+            "passed": true,
+            "reason": "default nightly audit"
+          }
+        ],
+        "total": 1
+      },
+      "started_at": "2026-04-14T09:02:08+00:00"
+    },
+    {
+      "finished_at": "2026-04-14T09:02:08+00:00",
+      "name": "patch_trial",
+      "output": {
+        "ab": {
+          "is_safe": true,
+          "pass_rate_delta": 0.0,
+          "recovered_count": 0,
+          "regressed_count": 0
+        },
+        "acceptance_reason": "audit only - no proposals applied",
+        "accepted": false,
+        "apply": {
+          "applied": [],
+          "applied_count": 0,
+          "skipped": [],
+          "skipped_count": 0
+        },
+        "rolled_back": false
+      },
+      "started_at": "2026-04-14T09:02:08+00:00"
+    }
+  ],
+  "trace_version": 1
+}

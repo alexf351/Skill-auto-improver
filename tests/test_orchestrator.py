@@ -701,6 +701,63 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(orchestration_meta["config"]["accepted_types"], ["instruction", "test_case"])
         self.assertEqual(orchestration_meta["fixture_names"], ["greeting_formal_check"])
         self.assertEqual(orchestration_meta["fixture_suggestions"]["greeting_formal_check"][0]["pattern_name"], "greeting_formal")
+        self.assertEqual(orchestration_meta["promotion_rules"]["evaluated_count"], 0)
+
+    def test_build_trial_context_includes_promotion_rule_decisions_for_proposals(self):
+        """Orchestration context should expose auto-apply/escalation decisions from learned promotion rules."""
+        skill_dir = Path(self.temp_dir.name) / "promotion-rule-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Demo Skill\n", encoding="utf-8")
+        proposals_path = Path(self.temp_dir.name) / "proposals-promotion-rules.json"
+        proposals_path.write_text(json.dumps([
+            {
+                "type": "instruction",
+                "fixture_name": "formal_greeting",
+                "description": "Tighten greeting instructions",
+                "confidence": 0.93,
+                "severity": "warning",
+            },
+            {
+                "type": "artifact",
+                "fixture_name": "unknown_fixture",
+                "description": "Needs review",
+                "confidence": 0.91,
+                "severity": "warning",
+            }
+        ]), encoding="utf-8")
+        wisdom = self.orchestrator.shared_brain.record_promotion(
+            fixture_name="formal_greeting",
+            skill_name="skill-a",
+            proposal_types=["instruction"],
+            reason="safe improvement",
+            confidence=0.93,
+        )
+        self.orchestrator.shared_brain.record_promotion(
+            fixture_name="formal_greeting",
+            skill_name="skill-b",
+            proposal_types=["instruction"],
+            reason="safe improvement",
+            confidence=0.93,
+        )
+        self.orchestrator.promotion_rules.learn_from_promotion(wisdom)
+
+        config = SkillTrialConfig(
+            skill_path=skill_dir,
+            skill_name="demo_skill",
+            proposals_path=proposals_path,
+            accepted_types=["instruction", "artifact"],
+        )
+
+        context = self.orchestrator._build_trial_context(config)
+        decisions = context["promotion_rules"]["decisions"]
+        self.assertEqual(context["promotion_rules"]["evaluated_count"], 2)
+        self.assertEqual(context["promotion_rules"]["auto_apply_count"], 1)
+        self.assertEqual(context["promotion_rules"]["escalation_count"], 1)
+        self.assertTrue(decisions[0]["should_auto_apply"])
+        self.assertEqual(decisions[0]["matched_wisdom"], wisdom.id)
+        self.assertEqual(decisions[0]["matched_rule"], "Auto-apply: formal_greeting")
+        self.assertTrue(decisions[1]["escalation_required"])
+        self.assertIn("No learned pattern", decisions[1]["escalation_reason"])
 
     def test_create_improver_factory_can_receive_config_and_brain_context(self):
         """Orchestrator should pass rich trial context into newer improver factories."""
@@ -800,6 +857,35 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(outcome["promotions_from_trial"], 3)
         self.assertEqual(outcome["proposal_types"], ["instruction", "test_case"])
         self.assertEqual(run.promotions_accepted, 1)
+
+    def test_extract_and_record_insights_teaches_promotion_rules_from_accepted_trial(self):
+        """Accepted orchestrated promotions should update the automated promotion-rules engine."""
+        run = OrchestrationRun(run_id="r4b", started_at="2026-03-28T00:00:00+00:00")
+        for skill_name in ["demo_skill", "other_skill"]:
+            config = SkillTrialConfig(skill_path="/tmp/demo", skill_name=skill_name, min_confidence=0.91)
+            trace = SkillAutoImprover(
+                observe=lambda ctx: {},
+                inspect=lambda ctx: {},
+                amend=lambda ctx: {},
+                evaluate=lambda ctx: {},
+            ).run_once(skill_path="/tmp/demo", logs_dir=Path(self.temp_dir.name) / "runs")
+            trace.metadata["patch_trial"] = {
+                "accepted": True,
+                "rolled_back": False,
+                "acceptance_reason": "safe improvement",
+                "applied_count": 1,
+                "skipped_count": 0,
+                "recovered_count": 1,
+                "regressed_count": 0,
+                "pass_rate_delta": 0.5,
+                "is_safe": True,
+                "applied": [{"proposal_type": "instruction"}],
+                "skipped": [],
+            }
+            self.orchestrator._extract_and_record_insights(config, trace, run)
+
+        self.assertEqual(len(self.orchestrator.promotion_rules.rules), 1)
+        self.assertEqual(self.orchestrator.promotion_rules.rules[0].fixture_pattern, "multi_fixture_trial")
 
     def test_preflight_trial_config_flags_type_only_policy_gaps(self):
         """Preflight should surface unattended runs where proposal types are guaranteed to be skipped."""
